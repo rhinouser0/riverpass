@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<db_config>
+    <db_base db_base_index="0">
+        <db_type>mysql</db_type>
+        <username>xxxx</username>
+        <password>xxxx</password>
+        <ip_protocol>tcp</ip_protocol>
+        <ip_address>xxxx</ip_address>
+        <port>3306</port>
+        <db_name>yyyy</db_name>
+        <table_name>
+            <files_table_name>oss_files</files_table_name>
+        </table_name>
+    </db_base>
+</db_config>

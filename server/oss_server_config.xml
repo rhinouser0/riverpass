@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<oss_server_config> 
+    <oss_holder_config oss_sub_sys_name="holder">
+        <oss_holder oss_holder_index="0">
+            <oss_holder_ip>0.0.0.0</oss_holder_ip>
+            <oss_holder_port>10008</oss_holder_port>          
+        </oss_holder>
+         <!-- <storage_pos>MEMORY</storage_pos> -->
+       <oss_storage_pos>DB</oss_storage_pos>
+       <oss_blob_local_path_prefix>/tmp/localfs_oss</oss_blob_local_path_prefix>
+    </oss_holder_config>
+    <oss_common_config>
+        <oss_4k_align>false</oss_4k_align>
+        <oss_max_cache_size_mb>102400</oss_max_cache_size_mb>
+        <oss_triplet_closing_threshold_mb>200</oss_triplet_closing_threshold_mb>
+        <oss_triplet_large_threshold_mb>100</oss_triplet_large_threshold_mb>
+        <oss_db_num>1</oss_db_num>
+    </oss_common_config>
+</oss_server_config>

@@ -46,6 +46,10 @@ func (mgr *CacheManager) New(fdb *db_ops.DBOpsFile, bh *blob.PhyBH) {
 	mgr.pQueue = make([]string, 0)
 	mgr.dbOpsFile = fdb
 	mgr.pbh = bh
+
+	// Dispatch background thread.
+	go mgr.loopBatchWrite()
+	go mgr.loopGarbageCollection()
 }
 
 func (mgr *CacheManager) EnqueueWriteReq(
@@ -110,7 +114,7 @@ func (mgr *CacheManager) loopBatchWrite() {
 	}
 }
 
-func (mgr *CacheManager) LoopGarbageCollection() {
+func (mgr *CacheManager) loopGarbageCollection() {
 	for {
 		time.Sleep(200 * time.Millisecond)
 		mgr.pMtx.Lock()

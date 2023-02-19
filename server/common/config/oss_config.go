@@ -29,7 +29,6 @@ type OssCommonConfigs struct {
 type OssHolderConfigs struct {
 	ConfigFlag             string      `xml:"oss_sub_sys_name,attr"`
 	OssHolders             []OssHolder `xml:"oss_holder"`
-	OssStoragePos          string      `xml:"oss_storage_pos"`
 	OssBlobLocalPathPrefix string      `xml:"oss_blob_local_path_prefix"`
 }
 
@@ -70,8 +69,6 @@ func (cfg *OssConfig) LoadXMLConfig(config_path string) {
 func (cfg *OssConfig) ParseXMLConfig2Definition() {
 
 	// holder
-	definition.DataPosition = cfg.OssHolderConfigs.OssStoragePos
-	log.Println("DataPosition : ", definition.DataPosition)
 
 	definition.BlobLocalPathPrefix = cfg.OssHolderConfigs.OssBlobLocalPathPrefix
 	log.Println("BlobLocalPathPrefix : ", definition.BlobLocalPathPrefix)

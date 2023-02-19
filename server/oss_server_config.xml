@@ -6,7 +6,6 @@
             <oss_holder_port>10008</oss_holder_port>          
         </oss_holder>
          <!-- <storage_pos>MEMORY</storage_pos> -->
-       <oss_storage_pos>DB</oss_storage_pos>
        <oss_blob_local_path_prefix>/tmp/localfs_oss</oss_blob_local_path_prefix>
     </oss_holder_config>
     <oss_common_config>

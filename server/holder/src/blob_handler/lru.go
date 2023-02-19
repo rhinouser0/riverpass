@@ -66,23 +66,6 @@ func (c *LruCache) Put(key string, value *Triplet) {
 	}
 }
 
-func (c *LruCache) Evict() int64 {
-	c.rwLock.Lock()
-	defer c.rwLock.Unlock()
-	ZapLogger.Info("[LRU PUT]  start evict")
-	node := c.removeTail()
-	//delete db item
-	err := c.dbOpsFile.DeleteFileWithTripleIdInDB(node.key)
-	if err != nil {
-		ZapLogger.Error("DELETE FILE IN DB ERROR", zap.Any("error", err))
-	}
-	c.dict.Delete(node.key)
-	c.size--
-	deleteSize := DeleteTripletFilesOnDisk(node.key)
-	ZapLogger.Info("[LRU PUT]  evict end", zap.Any("key", node.key))
-	return deleteSize
-}
-
 func (c *LruCache) addToHead(node *Node) {
 	c.listLock.Lock()
 	defer c.listLock.Unlock()
@@ -111,6 +94,12 @@ func (c *LruCache) removeTail() *Node {
 	node.prev.next = node.next
 	node.next.prev = node.prev
 	return node
+}
+
+func (c *LruCache) GetCurTailNameForEvict() string {
+	c.listLock.Lock()
+	defer c.listLock.Unlock()
+	return c.tail.key
 }
 
 func (c *LruCache) GetSize() int {

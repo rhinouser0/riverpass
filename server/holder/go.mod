@@ -8,7 +8,7 @@ require (
 )
 
 require (
-	github.com/aliyun/aliyun-oss-go-sdk v2.2.6+incompatible // indirect
+	github.com/cenkalti/backoff v2.2.1+incompatible // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
 	go.uber.org/atomic v1.7.0 // indirect
 	go.uber.org/multierr v1.6.0 // indirect
@@ -20,7 +20,6 @@ require (
 )
 
 require (
-	github.com/cenkalti/backoff v2.2.1+incompatible
 	github.com/common v0.0.0
 	github.com/go-sql-driver/mysql v1.6.0
 	go.uber.org/zap v1.23.0

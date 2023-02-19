@@ -90,11 +90,6 @@ func (fu *FileWriter) checkUploader() {
 	if fu.Pbh == nil {
 		log.Fatal("writer: FileWriter init not finished: Pbh")
 	}
-	if fu.BlobSegDb == nil {
-		if !dbops.IsOss {
-			log.Fatal("writer: FileWriter init not finished: BlobSegDb")
-		}
-	}
 	if fu.FileDb == nil {
 		log.Fatal("writer: FileWriter init not finished: FileDb")
 	}

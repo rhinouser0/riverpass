@@ -15,6 +15,7 @@ import (
 	"math/rand"
 	"os"
 	"regexp"
+	"sync/atomic"
 	"time"
 
 	"github.com/common/definition"
@@ -52,7 +53,10 @@ type PhyBH struct {
 	OpenTplt     *LruCache
 	ClosedTplt   *LruCache
 	LargeObjTplt *LruCache
-	totalBytes   int64
+	// Protected by atomic operations.
+	// TODO: fix the bug using counter pre-allocate rather than post-allocation
+	totalBytes int64
+	FDb        *dbops.DBOpsFile
 }
 
 func (tri *Triplet) New(shardId int, triId string, isLarge bool) int64 {
@@ -63,12 +67,6 @@ func (tri *Triplet) New(shardId int, triId string, isLarge bool) int64 {
 	mfSize := mf.New(shardId, triId)
 	binSize := bin.New(shardId, triId)
 
-	// Sync deletion log.
-	delBlbs := mf.GetDeletionLog()
-	for id := range delBlbs {
-		idx.Delete(id)
-	}
-
 	tri.Id = triId
 	tri.IdxHeader = &idx
 	tri.MFHeader = &mf
@@ -77,7 +75,7 @@ func (tri *Triplet) New(shardId int, triId string, isLarge bool) int64 {
 }
 
 // TODO: Add idx file and bin file cross check loading logic.
-func (pbh *PhyBH) New(shardId int) {
+func (pbh *PhyBH) New(shardId int, fdb *dbops.DBOpsFile) {
 	pbh.ShardId = shardId
 	pbh.OpenTplt = new(LruCache)
 	pbh.OpenTplt.New()
@@ -90,32 +88,32 @@ func (pbh *PhyBH) New(shardId int) {
 	// load from FS the triplets, check and hydrate the PhyBH.
 	var triIds []string
 	var totalSize int64
-	if !dbops.IsOss {
-		log.Println("[PhyBH.NEW] ScanLocalFS")
-		triIds, totalSize = ScanLocalFS(shardId)
-		pbh.totalBytes = totalSize
-	} else {
-		log.Println("[PhyBH.NEW] ScanDB")
-		var triIdsInDisk []string
-		triIdsInDisk, totalSize = ScanLocalFS(shardId)
-		var dbOpsFile dbops.DBOpsFile
-		log.Printf("[PhyBH.NEW] PhyBH: DELETE PENDING FILES IN DB")
-		dbOpsFile.DeleteAllPendingFileInDB()
-		triIds = ScanDB()
-		setDB := make(map[string]struct{})
-		for _, v := range triIds {
-			setDB[v] = struct{}{}
-		}
-		orphanSize := int64(0)
-		for _, v := range triIdsInDisk {
-			if _, ok := setDB[v]; !ok {
-				log.Printf("[PhyBH.NEW] PhyBH: DELETE ORPHAN FILE ON DISK, tripleid: %s\n", v)
-				orphanSize += DeleteTripletFilesOnDisk(v)
-			}
-		}
-		log.Printf("[PhyBH.NEW] totalSize: %v,orphanSize: %v\n", totalSize, orphanSize)
-		pbh.totalBytes = totalSize - orphanSize
+	log.Println("[PhyBH.NEW] ScanDB")
+	var triIdsInDisk []string
+	triIdsInDisk, totalSize = ScanLocalFS(shardId)
+
+	pbh.FDb = fdb
+
+	log.Printf("[PhyBH.NEW] PhyBH: DELETE PENDING FILES IN DB")
+	pbh.FDb.DeleteAllPendingFileInDB()
+	triIds, err := pbh.FDb.ListTripleIdOfAllFiles()
+	if err != nil {
+		log.Fatalln(err)
 	}
+	setDB := make(map[string]struct{})
+	for _, v := range triIds {
+		setDB[v] = struct{}{}
+	}
+	orphanSize := int64(0)
+	for _, v := range triIdsInDisk {
+		if _, ok := setDB[v]; !ok {
+			log.Printf("[PhyBH.NEW] PhyBH: DELETE ORPHAN FILE ON DISK, tripleid: %s\n", v)
+			orphanSize += DeleteTripletFilesOnDisk(v)
+		}
+	}
+	log.Printf("[PhyBH.NEW] totalSize: %v,orphanSize: %v\n", totalSize, orphanSize)
+	pbh.totalBytes = totalSize - orphanSize
+
 	if pbh.totalBytes < 0 {
 		log.Println("[PhyBH.NEW WARNING] PhyBH: totalBytes < 0 ", pbh.totalBytes)
 		pbh.totalBytes = 0
@@ -145,7 +143,6 @@ func (pbh *PhyBH) New(shardId int) {
 	}
 	// Create a new triplet for taking write.
 	if cnt == 0 {
-		pbh.AllocateSpaceForTplt(K_empty_idxmf_file_overhead)
 		ptrTplt, tmpSize := pbh.openNewTplt(false)
 		pbh.totalBytes += tmpSize
 		pbh.OpenTplt.Put((*ptrTplt).Id, ptrTplt)
@@ -155,39 +152,24 @@ func (pbh *PhyBH) New(shardId int) {
 	log.Println("[PhyBH.NEW] PhyBH: Caculate totalBytes after initialization ", pbh.totalBytes)
 	// init goroutine for size checking and closing.
 	go pbh.LoopHotSwap()
-	// init goroutine for migration.
-	//go pbh.LoopMigration()
 }
 
-func (pbh *PhyBH) AllocateSpaceForTplt(dataSize int64) {
-	for int64(dataSize) > definition.F_CACHE_MAX_SIZE-pbh.totalBytes && dbops.IsOss {
-		log.Printf("[EvictData start] datasize:%v definition.F_CACHE_MAX_SIZE:%v  pbh.totalBytes:%v \n", dataSize, definition.F_CACHE_MAX_SIZE, pbh.totalBytes)
-		var deleteSize int64
-		if pbh.LargeObjTplt.size == 0 && pbh.ClosedTplt.size == 0 {
-			deleteSize = pbh.OpenTplt.Evict()
-			pbh.totalBytes -= deleteSize
-			pbh.AllocateSpaceForTplt(K_empty_idxmf_file_overhead)
-			ptrTplt, tmpSize := pbh.openNewTplt(false)
-			pbh.totalBytes += tmpSize
-			pbh.OpenTplt.Put((*ptrTplt).Id, ptrTplt)
-			break
-		}
-		if dataSize > definition.K_triplet_large_threshold {
-			if pbh.LargeObjTplt.size != 0 {
-				deleteSize = pbh.LargeObjTplt.Evict()
-			} else {
-				deleteSize = pbh.ClosedTplt.Evict()
-			}
-		} else {
-			if pbh.ClosedTplt.size != 0 {
-				deleteSize = pbh.ClosedTplt.Evict()
-			} else {
-				deleteSize = pbh.LargeObjTplt.Evict()
-			}
-		}
-		log.Printf("[EvictData end] datasize:%v definition.F_CACHE_MAX_SIZE:%v  pbh.totalBytes:%v \n", dataSize, definition.F_CACHE_MAX_SIZE, pbh.totalBytes)
-		pbh.totalBytes -= deleteSize
+func (pbh *PhyBH) PurgeTriplet(tpltId string) {
+	pbh.ClosedTplt.DeleteFromCache(tpltId)
+	pbh.ClosedTplt.DeleteFromCache(tpltId)
+	atomic.AddInt64(&pbh.totalBytes, ^int64(DeleteTripletFilesOnDisk(tpltId)-1))
+}
+
+// TODO: always purge small object tplt first. Need to change to more
+// wise logic.
+func (pbh *PhyBH) GetTailNameForEvict() (string, error) {
+	if pbh.ClosedTplt.size != 0 {
+		return pbh.ClosedTplt.GetCurTailNameForEvict(), nil
 	}
+	if pbh.ClosedTplt.size == 0 {
+		return pbh.LargeObjTplt.GetCurTailNameForEvict(), nil
+	}
+	return "", errors.New("no tail to purge")
 }
 
 // Stateful:
@@ -197,19 +179,25 @@ func (pbh *PhyBH) AllocateSpaceForTplt(dataSize int64) {
 // * if service crashes after bin-flush and idx-flush, data persisted.
 // * it's ok mf file doesn't contain put record.
 func (pbh *PhyBH) Put(blbId string, data []byte) (token string, err error) {
+	payloadSize := util.GetPayloadSize(len(data))
+	maxAllocSize := K_empty_idxmf_file_overhead + payloadSize +
+		K_index_entry_len + K_mf_entry_len + 4
+
+	if maxAllocSize > definition.F_CACHE_MAX_SIZE-atomic.LoadInt64(&pbh.totalBytes) {
+		return "", errors.New("cache full")
+	}
 	// Intentionally no locking to avoid hurting concurrency: we don't think
 	// the write skew could be very bad.
 	var triplet *Triplet
-	payloadSize := util.GetPayloadSize(len(data))
-	maxAllocSize := K_empty_idxmf_file_overhead + payloadSize + K_index_entry_len + K_mf_entry_len + 4
-	pbh.AllocateSpaceForTplt(maxAllocSize)
+
 	if payloadSize > definition.K_triplet_large_threshold {
 		var size int64
 		triplet, size = pbh.openNewTplt(true)
-		pbh.totalBytes += size
+		atomic.AddInt64(&pbh.totalBytes, size)
 		pbh.LargeObjTplt.Put(triplet.Id, triplet)
 		log.Printf("[INFO] PhyBH: Large triplet has created, id: %s", triplet.Id)
-		token = definition.K_LARGE_OBJECT_PREFIX + util.GenerateBlobToken(triplet.Id, blbId)
+		token = definition.K_LARGE_OBJECT_PREFIX +
+			util.GenerateBlobToken(triplet.Id, blbId)
 		log.Printf("[INFO] PhyBH: Generated blob token: %s", token)
 	} else {
 		numOpenTplt := pbh.OpenTplt.size
@@ -242,18 +230,13 @@ func (pbh *PhyBH) Put(blbId string, data []byte) (token string, err error) {
 		return "", idxErr
 	}
 	// step 3: Persist action in MF. Flush may or may not succeed
-	var mfBytes int64
-	var mfErr error
-	if dbops.IsOss {
-		mfBytes, mfErr = triplet.MFHeader.Put(blbId)
-		if mfErr != nil {
-			log.Fatalln("[ERROR] PhyBH: mfERROR", mfErr)
-		}
-	} else {
-		go triplet.MFHeader.Put(blbId)
+	mfBytes, mfErr := triplet.MFHeader.Put(blbId)
+	if mfErr != nil {
+		log.Fatalln("[ERROR] PhyBH: mfERROR", mfErr)
 	}
-	pbh.totalBytes += int64(payloadSize) + idxBytes + mfBytes
-	log.Printf("[INFO] PhyBH: Put blob succeeded, token[%s], totalBytes[%v] \n", token, pbh.totalBytes)
+	atomic.AddInt64(&pbh.totalBytes, int64(payloadSize)+idxBytes+mfBytes)
+	log.Printf("[INFO] PhyBH: Put blob succeeded, token[%s], totalBytes[%v] \n",
+		token, atomic.LoadInt64(&pbh.totalBytes))
 	return token, nil
 }
 
@@ -302,33 +285,6 @@ func (pbh *PhyBH) Get(token string) (data []byte, err error) {
 	return data, nil
 }
 
-// Delete token require deletion log persist in Manifest file before return.
-// TODO: update pbh.totalBytes
-func (pbh *PhyBH) Delete(token string) (err error) {
-	tpltId := util.GetTripletIdFromToken(token)
-	blbId := util.GetBlobIdFromToken(token)
-
-	var hostTplt *Triplet
-	if triplet := pbh.OpenTplt.Get(tpltId); triplet != nil {
-		hostTplt = triplet
-	} else if triplet := pbh.ClosedTplt.Get(tpltId); triplet != nil {
-		hostTplt = triplet
-	} else {
-		return errors.New("blob not exist in this blob handler shard")
-	}
-
-	if _, err := hostTplt.MFHeader.Delete(blbId); err != nil {
-		return errors.New("blob deletion in manifest failed")
-	}
-	err = hostTplt.IdxHeader.Delete(blbId)
-	if err != nil {
-		return err
-	}
-	log.Printf("[INFO] PhyBH: Delete success, blob[%s] deleted in tplt[%s]\n",
-		blbId, tpltId)
-	return nil
-}
-
 func (pbh *PhyBH) openNewTplt(isLarge bool) (*Triplet, int64) {
 	uuid := util.GenerateTriId()
 	var newTplt Triplet
@@ -372,9 +328,8 @@ func (pbh *PhyBH) LoopHotSwap() {
 		dict.Range(func(k, v interface{}) bool {
 			if v.(*Node).value.BinHeader.CurOff > definition.K_triplet_closing_threshold {
 				idToClose = append(idToClose, k.(string))
-				pbh.AllocateSpaceForTplt(K_empty_idxmf_file_overhead)
 				tplt, size := pbh.openNewTplt(false)
-				pbh.totalBytes += size
+				atomic.AddInt64(&pbh.totalBytes, size)
 				newOpens = append(newOpens, tplt)
 			}
 			return true
@@ -400,16 +355,7 @@ func (pbh *PhyBH) LoopHotSwap() {
 // 2. copy the mf file to OSS/COS, override the origin
 // 3. move binary file to OSS/COS, remove local.
 // to OSS or COS, but leaving the info in memory.
-func (pbh *PhyBH) LoopMigration() {
-	for {
-		time.Sleep(2 * time.Second)
-		// Scan open triplets, find those can be closed
-		dict := pbh.ClosedTplt.dict
-		dict.Range(func(k, v interface{}) bool {
-			return true
-		})
-	}
-}
+// func (pbh *PhyBH) LoopMigration() {}
 
 func ScanLocalFS(shardId int) ([]string, int64) {
 	localfsPrefix := definition.BlobLocalPathPrefix
@@ -450,15 +396,6 @@ func GetFileSize(path string) int64 {
 		log.Fatalln("[ScanLocalFS] error ", err)
 	}
 	return file.Size()
-}
-
-func ScanDB() []string {
-	var dbOpsFile dbops.DBOpsFile
-	triIds, err := dbOpsFile.ListTripleIdOfAllFiles()
-	if err != nil {
-		log.Fatalln(err)
-	}
-	return triIds
 }
 
 func RemoveFile(path string) int64 {

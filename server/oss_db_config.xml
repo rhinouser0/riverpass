@@ -2,12 +2,12 @@
 <db_config>
     <db_base db_base_index="0">
         <db_type>mysql</db_type>
-        <username>xxxx</username>
-        <password>xxxx</password>
+        <username>dirservice0</username>
+        <password>D1rserv1ceo!</password>
         <ip_protocol>tcp</ip_protocol>
-        <ip_address>xxxx</ip_address>
+        <ip_address>rm-uf6u32r14175s6fv7.mysql.rds.aliyuncs.com</ip_address>
         <port>3306</port>
-        <db_name>yyyy</db_name>
+        <db_name>dirservice_csun</db_name>
         <table_name>
             <files_table_name>oss_files</files_table_name>
         </table_name>

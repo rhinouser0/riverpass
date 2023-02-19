@@ -1,4 +1,4 @@
-# Rhino Cache: Local Disk Based Object Storage Cache
+# Ryno: Local Disk Based Cache to Remote Object Storage Services
 
 This project introduced a handy local cache to store hot content at local storage. 
 

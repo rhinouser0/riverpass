@@ -149,8 +149,9 @@ func (s *OssHolderServer) TryReadFromCache(
 	if err != nil {
 		log.Fatalln(err)
 	}
+	log.Println(fm)
 	// Didn't find the file in cache.
-	if fm == nil || fm.Id == "" {
+	if fm == nil {
 		pendingFid, err := s.CreateFileForCache(fileName)
 		if err != nil {
 			log.Fatalln(err)

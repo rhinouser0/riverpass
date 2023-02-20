@@ -244,8 +244,6 @@ func (opsFile *DBOpsFile) ListFileFromDB(fileId string, state int32) (*definitio
 
 	//DBres handle
 	fm = DBFileMeta2FileMeta(&dbfm)
-	log.Print("[DEBUG] dbfm:", dbfm, "OwnerList:", dbfm.OwnerList,
-		"\n\tfm:", fm, "OwnerList:", fm.OwnerList, "\n")
 	return &fm, nil
 }
 

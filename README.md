@@ -1,11 +1,43 @@
-# Ryno: Local Disk Based Cache to Remote Object Storage Services
+<small> [简体中文](README_zh.md) | English </small>
 
-This project introduced a handy local cache to store hot content at local storage. 
+## Ryno | [Documentation](docs/)
+[![GitHub license](https://img.shields.io/badge/license-apache--2--Clause-brightgreen.svg)](./LICENSE)
 
-We provided docker image which comes with the binary and required MySQL instance. After instance starts, the cache usage is as simple as wget http://localhost:10009/getFile?url=https://deploee.oss-cn-shanghai.aliyuncs.com/resnet18.tar, in which, the cache is deployed at local host, and the url(https://deploee.oss-cn-shanghai.aliyuncs.com/resnet18.tar) is a reference to a model store at Aliyun OSS with open-read access.
+---
 
-The persistence module borrowed some thoughts from Haystack, the well known BLoB storage design by Facebook; The cache algorithm currently is a naive LRU on blocks of aggregated BLoBs. 
+A handy local disk based cache for hot content from remote storage. 
 
-We use MySQL and the Haystack like design to make sure the program is resumable.
+* Extremely simple command start and stop the cache.
+* No heavy configuration steps with the remote cloud storages.
+* Cache item persistence ability: previous items will be reloaded after server restart.
 
-We hope to continuous improve our caching algorithm, thread model, etc. Also welcome to contribute. 
+## Design
+[Detailed design document](docs/original-design-doc.md)
+
+## HowTo
+* How to use
+  * Enter `server` folder, run `./oss_docker_start.sh 100`, '100' means cache size 100MB. Cache data default flushes to /tmp/localfs_oss/ folder.
+  * Use `wget <url>` command, replacing host path by localhost and cache port. eg.: `wget https://deploee.oss-cn-shanghai.aliyuncs.com/resnet18.tar`
+  * Run `./oss_docker_stop.sh` to stop the cache. Data will be left on disk.
+  * Run `./oss_docker_restart.sh` to restart the cache, data and their metadata will be loaded.
+* How to build
+  * Enter `server/holder` folder, run `./oss_start.sh` to build the go program and start server for debug.
+* [How to contribute](docs/how-to-contribute.zh.md)
+
+## Dependency
+* MySQL 8.0
+* Aliyun OSS SDK
+
+## Coming Soon
+- CI and test coverage
+- Stale metadata GC in DB
+- OSS download optimization
+- Object service from other cloud provider
+- Cache eviction algorithm improvement
+
+## Contact Us
+  * Issue: https://github.com/rhinouser0/ryno/issues
+  * Email: rhino_fs@163.com
+
+## License
+- [Apache 2.0](LICENSE)

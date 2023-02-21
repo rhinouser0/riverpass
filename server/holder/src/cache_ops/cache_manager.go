@@ -6,10 +6,10 @@ package cache_ops
 
 import (
 	"bytes"
-	"errors"
 	"io"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -136,7 +136,7 @@ func (mgr *CacheManager) loopGarbageCollection() {
 			delete(mgr.purgeItemMap, tpltId)
 		}
 		wg.Wait()
-		mgr.wMtx.Unlock()
+		mgr.pMtx.Unlock()
 	}
 }
 
@@ -156,7 +156,7 @@ func (mgr *CacheManager) dowloadAndWriteCache(
 	token, err := mgr.WriteToCache(fileName, definition.F_DB_STATE_READY, ossData)
 
 	if err != nil {
-		if errors.Is(err, errors.New("cache full")) {
+		if strings.Contains(err.Error(), "cache full") {
 			mgr.EnqueueDeletionReq()
 			return
 		} else {

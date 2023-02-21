@@ -1,4 +1,4 @@
-# Ryno Cache Design
+# Riverpass Cache Design
 ## Persistence 
 1. We use a set of files together the persist data on HDD or SSDs. These files are grouped by every 2, and each of these 2 are called a "triplet". The name "triplet" comes from the original 3-file design with another manifest file, which is removed in current master version. Files in a triplet orchestrate together to perform system crash resumable BLoB data persistence. It has some similarity of "Haystack", the Facebook blob storage base born in last decade.
 2. Within a triplet, index file and the blob content files are logically binding to 1 same set of blobs.

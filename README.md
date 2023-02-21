@@ -1,4 +1,4 @@
-## Ryno | [Documentation](docs/)
+## Riverpass | [Documentation](docs/)
 [![GitHub license](https://img.shields.io/badge/license-apache--2--Clause-brightgreen.svg)](./LICENSE)
 
 A handy local disk based cache for hot content from remote storage. 

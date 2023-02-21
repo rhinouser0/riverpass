@@ -1,40 +1,40 @@
 # 如何提交代码
 
 ## 一、fork 分支
-在浏览器中打开 [Ryno](https://github.com/rhinouser0/ryno), `fork` 到自己的 repositories，例如
+在浏览器中打开 [Riverpass](https://github.com/rhinouser0/riverpass), `fork` 到自己的 repositories，例如
 ```
-https://github.com/user/ryno
+https://github.com/user/riverpass
 ```
 
 clone 项目到本地，添加官方 remote 并 fetch:
 ```
-$ git clone https://github.com/user/ryno && cd ryno
-$ git remote add ryno_master https://github.com/rhinouser0/ryno
-$ git fetch ryno_master
+$ git clone https://github.com/user/riverpass && cd riverpass
+$ git remote add rp_master https://github.com/rhinouser0/riverpass
+$ git fetch rp_master
 ```
-对于 `git clone` 下来的项目，它现在有两个 remote，分别是 origin 和 ryno_master
+对于 `git clone` 下来的项目，它现在有两个 remote，分别是 origin 和 rp_master
 
 ```
 $ git remote -v
-origin   https://github.com/user/ryno (fetch)
-origin   https://github.com/user/ryno (push)
-ryno_official  https://github.com/rhinouser0/ryno (fetch)
-ryno_official  https://github.com/rhinouser0/ryno (push)
+origin   https://github.com/user/riverpass (fetch)
+origin   https://github.com/user/riverpass (push)
+rp_master  https://github.com/rhinouser0/riverpass (fetch)
+rp_master  https://github.com/rhinouser0/riverpass (push)
 ```
-origin 指向你 fork 的仓库地址；ryno_official 即官方 repo。可以基于不同的 remote 创建和提交分支。
+origin 指向你 fork 的仓库地址；rp_master 即官方 repo。可以基于不同的 remote 创建和提交分支。
 
 例如切换到官方 master 分支，并基于此创建自己的分支（命名尽量言简意赅。一个分支只做一件事，方便 review 和 revert）
 ```
-$ git checkout ryno_official/master
+$ git checkout rp_master/master
 $ git checkout -b my-awesome-branch
 ```
 
 或创建分支时指定基于官方 master 分支：
 ```
-$ git checkout -b fix-typo-in-document ryno_official/master
+$ git checkout -b fix-typo-in-document rp_master/master
 ```
 
-> `git fetch` 是从远程获取最新代码到本地。如果是第二次 pr ryno  `git fetch ryno_official` 开始即可，不需要 `git remote add ryno_official`，也不需要修改 `github.com/user/ryno`。
+> `git fetch` 是从远程获取最新代码到本地。如果是第二次 pr riverpass  `git fetch rp_master` 开始即可，不需要 `git remote add rp_master`，也不需要修改 `github.com/user/riverpass`。
 
 ## 二、代码习惯
 为了增加沟通效率，reviewer 一般要求 contributor 遵从以下规则
@@ -59,7 +59,7 @@ $ git push origin my-awesome-branch
 推荐使用 [`commitizen`](https://pypi.org/project/commitizen/) 或 [`gitlint`](https://jorisroovers.com/gitlint/) 等工具格式化 commit message，方便事后检索海量提交记录
 
 ## 三、代码提交
-浏览器中打开 [Ryno pulls](https://github.com/rhinouser0/ryno) ，此时应有此分支 pr 提示，点击 `Compare & pull request`
+浏览器中打开 [Riverpass pulls](https://github.com/rhinouser0/riverpass) ，此时应有此分支 pr 提示，点击 `Compare & pull request`
 
 * 标题**必须**是英文。未完成的分支应以 `WIP:` 开头，例如 `WIP: fix-typo`
 * 正文宜包含以下内容

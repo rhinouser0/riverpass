@@ -1,11 +1,15 @@
 ## Riverpass | [Documentation](docs/)
 [![GitHub license](https://img.shields.io/badge/license-apache--2--Clause-brightgreen.svg)](./LICENSE)
 
-A handy local disk based cache for hot content from remote storage. 
+A handy async file cache service
 
-* Extremely simple command start and stop the cache.
-* No heavy configuration steps with the remote cloud storages.
-* Cache item persistence ability: previous items will be reloaded after server restart.
+```bash
+$ wget http://localhost:getFile?url=$YOUR_REMOTE_URL
+```
+
+* Cache for hot content from remote
+* Extremely simple start and stop command, no heavy configuration
+* Cache item persistence ability: previous items will be reloaded after server restart
 
 ## Design
 [Detailed design document](docs/original-design-doc.md)
@@ -13,7 +17,7 @@ A handy local disk based cache for hot content from remote storage.
 ## HowTo
 * How to use
   * Enter `server` folder, run `./oss_docker_start.sh 100`, '100' means cache size 100MB. Cache data default flushes to /tmp/localfs_oss/ folder.
-  * Use `wget <url>` command, replacing host path by localhost and cache port. eg.: `wget https://deploee.oss-cn-shanghai.aliyuncs.com/resnet18.tar`
+  * Use `wget <url>` command, replacing host path by localhost and cache port. eg.: `wget http://localhost:10009/getFile?url=https://raw.githubusercontent.com/open-mmlab/mmdeploy/master/resources/mmdeploy-logo.png`
   * Run `./oss_docker_stop.sh` to stop the cache. Data will be left on disk.
   * Run `./oss_docker_restart.sh` to restart the cache, data and their metadata will be loaded.
 * How to build

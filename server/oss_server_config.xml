@@ -10,7 +10,7 @@
     </oss_holder_config>
     <oss_common_config>
         <oss_4k_align>false</oss_4k_align>
-        <oss_max_cache_size_mb>102400</oss_max_cache_size_mb>
+        <oss_max_cache_size_mb>10240</oss_max_cache_size_mb>
         <oss_triplet_closing_threshold_mb>200</oss_triplet_closing_threshold_mb>
         <oss_triplet_large_threshold_mb>100</oss_triplet_large_threshold_mb>
         <oss_db_num>1</oss_db_num>

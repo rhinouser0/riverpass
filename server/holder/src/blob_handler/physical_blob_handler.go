@@ -1,5 +1,5 @@
 /////////////////////////////////////////
-// 2022 PJLab Storage all rights reserved
+// 2022 SHAI Lab all rights reserved
 /////////////////////////////////////////
 
 // TODO: It's is not eventual goal to use phy blb handler to directly handle

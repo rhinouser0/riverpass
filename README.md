@@ -1,3 +1,5 @@
+<small> [简体中文](README_zh.md) | English </small>
+
 ## Riverpass | [Documentation](docs/)
 [![GitHub license](https://img.shields.io/badge/license-apache--2--Clause-brightgreen.svg)](./LICENSE)
 

@@ -1,6 +1,6 @@
-/////////////////////////////////////////
-// 2022 SHAI Lab all rights reserved
-/////////////////////////////////////////
+// //////////////////////////////
+// 2022 SHLab all rights reserved
+// //////////////////////////////
 
 // TODO: It's is not eventual goal to use phy blb handler to directly handle
 // blob writes. We need to create a logical_blob_handler file, wrap
@@ -360,7 +360,7 @@ func (pbh *PhyBH) LoopHotSwap() {
 func ScanLocalFS(shardId int) ([]string, int64) {
 	localfsPrefix := definition.BlobLocalPathPrefix
 	if localfsPrefix == "" {
-		localfsPrefix = "/tmp/localfs/"
+		localfsPrefix = "/var/lib/docker/.cache"
 	}
 	localFSDir := localfsPrefix
 	totalSize := int64(0)
@@ -414,11 +414,9 @@ func RemoveFile(path string) int64 {
 }
 
 func DeleteTripletFilesOnDisk(tripleId string) int64 {
-	//delete file on disk
-	//binary_0_fa2dfe66.dat  idx_h_0_fa2dfe66.dat  mf_h_0_fa2dfe66.dat
 	localfsPrefix := definition.BlobLocalPathPrefix
 	if localfsPrefix == "" {
-		localfsPrefix = "/tmp/localfs/"
+		localfsPrefix = "/var/lib/docker/.cache"
 	}
 	res := int64(0)
 	shardId := dbops.ShardID

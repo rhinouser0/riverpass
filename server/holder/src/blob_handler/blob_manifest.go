@@ -1,6 +1,6 @@
-/////////////////////////////////////////
-// 2022 SHAI Lab all rights reserved
-/////////////////////////////////////////
+// //////////////////////////////
+// 2022 SHLab all rights reserved
+// //////////////////////////////
 
 package blob_handler
 
@@ -68,7 +68,7 @@ func (mfh *MFHeader) New(shardId int, triId string) int64 {
 
 	localfsPrefix := definition.BlobLocalPathPrefix
 	if localfsPrefix == "" {
-		localfsPrefix = "/tmp/localfs/"
+		localfsPrefix = "/var/lib/docker/.cache"
 	}
 	mfh.LocalName = fmt.Sprintf("%s/%s", localfsPrefix, fileName)
 

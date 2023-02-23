@@ -1,6 +1,6 @@
-/////////////////////////////////////////
-// 2022 SHAI Lab all rights reserved
-/////////////////////////////////////////
+// //////////////////////////////
+// 2022 SHLab all rights reserved
+// //////////////////////////////
 
 package blob_handler
 
@@ -100,7 +100,7 @@ func (ih *IndexHeader) New(shardId int, triId string, isLarge bool) int64 {
 	ih.Empty = true
 	localfsPrefix := definition.BlobLocalPathPrefix
 	if localfsPrefix == "" {
-		localfsPrefix = "/tmp/localfs/"
+		localfsPrefix = "/var/lib/docker/.cache"
 	}
 	ih.LocalName = fmt.Sprintf("%s/idx_h_%d_%s.dat", localfsPrefix, shardId, triId)
 	info, err := os.Stat(ih.LocalName)

@@ -1,6 +1,6 @@
-/////////////////////////////////////////
-// 2022 SHAI Lab all rights reserved
-/////////////////////////////////////////
+// //////////////////////////////
+// 2022 SHLab all rights reserved
+// //////////////////////////////
 
 package cache_ops
 
@@ -165,7 +165,7 @@ func (mgr *CacheManager) dowloadAndWriteCache(
 	}
 	log.Println("[dowloadAndWriteCache] token:", token)
 	err = mgr.SealFileAtCache(pendingFid, token, int32(len(ossData)))
-	// TODO(csun): if the error is conflict, return
+	// TODO: if the error is conflict, return
 	if err != nil {
 		log.Fatalln(err)
 	}

@@ -1,7 +1,6 @@
-/////////////////////////////////////////
-// 2022 PJLab Storage all rights reserved
-// Author: Chen Sun
-/////////////////////////////////////////
+// //////////////////////////////
+// 2022 SHLab all rights reserved
+// //////////////////////////////
 
 package cache_ops
 
@@ -10,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,71 +18,132 @@ import (
 	"holder/src/file_handler"
 
 	"github.com/common/definition"
+	. "github.com/common/zaplog"
+	"go.uber.org/zap"
 )
 
+// TODO:
+// 1. Need GC db metadata loop
+// 2. Need optimize the OSS download
+// 3. Need improving the cache eviction algorithm
 type CacheManager struct {
-	wMtx sync.Mutex
-	pMtx sync.Mutex
+	wMtx         sync.Mutex
+	writeItemMap map[string]string
+	wQueue       []string
 
-	writeItemMap map[string]int
-	queue        []string
+	pMtx         sync.Mutex
+	purgeItemMap map[string]time.Time
+	pQueue       []string
 
-	purgeEnqueued bool
-
-	dbOpsFile db_ops.DBOpsFile
-	pbh       blob.PhyBH
+	dbOpsFile *db_ops.DBOpsFile
+	pbh       *blob.PhyBH
 }
 
-func (mgr *CacheManager) EnqueueWriteReq(fileName string) {
+func (mgr *CacheManager) New(fdb *db_ops.DBOpsFile, bh *blob.PhyBH) {
+	mgr.writeItemMap = make(map[string]string)
+	mgr.purgeItemMap = make(map[string]time.Time)
+	mgr.wQueue = make([]string, 0)
+	mgr.pQueue = make([]string, 0)
+	mgr.dbOpsFile = fdb
+	mgr.pbh = bh
+
+	// Dispatch background thread.
+	go mgr.loopBatchWrite()
+	go mgr.loopGarbageCollection()
+}
+
+func (mgr *CacheManager) EnqueueWriteReq(
+	pendingFid string, fileName string) {
 	mgr.wMtx.Lock()
+	defer mgr.wMtx.Unlock()
 	_, exist := mgr.writeItemMap[fileName]
 	if exist {
 		return
 	}
-	mgr.writeItemMap[fileName] = 1
-	mgr.queue = append(mgr.queue, fileName)
-	mgr.wMtx.Unlock()
+	mgr.writeItemMap[fileName] = pendingFid
+	mgr.wQueue = append(mgr.wQueue, fileName)
 }
 
-func (mgr *CacheManager) EnqueuePurgeReq() {
-
+// Assuming with lock.
+func (mgr *CacheManager) EnqueueDeletionReq() {
+	mgr.pMtx.Lock()
+	defer mgr.pMtx.Unlock()
+	tpltId, err := mgr.pbh.GetTailNameForEvict()
+	if err != nil {
+		return
+	}
+	err = mgr.dbOpsFile.DeleteFileWithTripleIdInDB(tpltId)
+	if err != nil {
+		ZapLogger.Error("DELETE FILE IN DB ERROR", zap.Any("error", err))
+		return
+	}
+	mgr.purgeItemMap[tpltId] = time.Now()
+	mgr.pQueue = append(mgr.pQueue, tpltId)
 }
 
 func (mgr *CacheManager) loopBatchWrite() {
 	for {
 		time.Sleep(200 * time.Millisecond)
+
 		mgr.wMtx.Lock()
-		if len(mgr.queue) == 0 {
+		if len(mgr.wQueue) == 0 {
 			mgr.wMtx.Unlock()
 			continue
 		}
-		numToFetch := min(definition.F_num_batch_write, len(mgr.queue))
-		var itemsAtHand = mgr.queue[:numToFetch]
-		mgr.queue = mgr.queue[numToFetch:]
+		numToFetch := min(definition.F_num_batch_write, len(mgr.wQueue))
+		var namesAtHand = mgr.wQueue[:numToFetch]
+		mgr.wQueue = mgr.wQueue[numToFetch:]
+
+		var pendingFids []string
+		for _, name := range namesAtHand {
+			pendingFids = append(pendingFids, mgr.writeItemMap[name])
+			delete(mgr.writeItemMap, name)
+		}
 		mgr.wMtx.Unlock()
+
 		// Start handling jobs. This will block the main job pulling thread.
 		wg := &sync.WaitGroup{}
-		for _, fileName := range itemsAtHand {
+		for i, fileName := range namesAtHand {
 			wg.Add(1)
-			go func(filename string) {
-				mgr.dowloadAndWriteCache(filename)
+			go func(filename string, pendingFid string) {
+				mgr.dowloadAndWriteCache(filename, pendingFid)
 				wg.Done()
-			}(fileName)
+			}(fileName, pendingFids[i])
 		}
 		wg.Wait()
 	}
 }
 
-func (mgr *CacheManager) dowloadAndWriteCache(fileName string) {
+func (mgr *CacheManager) loopGarbageCollection() {
+	for {
+		time.Sleep(200 * time.Millisecond)
+		mgr.pMtx.Lock()
+		if len(mgr.purgeItemMap) == 0 {
+			mgr.pMtx.Unlock()
+			continue
+		}
+		wg := &sync.WaitGroup{}
+		for _, tpltId := range mgr.pQueue {
+			if time.Now().Sub(mgr.purgeItemMap[tpltId]).Milliseconds() <
+				definition.F_cache_purge_waiting_ms {
+				continue
+			}
+			wg.Add(1)
+			go func(id string) {
+				mgr.pbh.PurgeTriplet(id)
+				wg.Done()
+			}(tpltId)
+			delete(mgr.purgeItemMap, tpltId)
+		}
+		wg.Wait()
+		mgr.pMtx.Unlock()
+	}
+}
+
+func (mgr *CacheManager) dowloadAndWriteCache(
+	fileName string, pendingFid string) {
 	exist, ossDataLen := CheckUrl(fileName)
 	if !exist {
-		return
-	}
-
-	mgr.pMtx.Lock()
-	if mgr.purgeEnqueued || int64(ossDataLen) > definition.F_CACHE_MAX_SIZE-mgr.pbh.totalBytes {
-		mgr.purgeEnqueued = true
-		mgr.pMtx.Unlock()
 		return
 	}
 
@@ -93,22 +154,28 @@ func (mgr *CacheManager) dowloadAndWriteCache(fileName string) {
 	}
 	// 2. Write To Cache
 	token, err := mgr.WriteToCache(fileName, definition.F_DB_STATE_READY, ossData)
-	// TODO(csun): if the error is cache full, return
+
 	if err != nil {
-		log.Fatalln(err)
+		if strings.Contains(err.Error(), "cache full") {
+			mgr.EnqueueDeletionReq()
+			return
+		} else {
+			log.Fatalln(err)
+		}
 	}
-	log.Println("[GetFromOssAndWriteToCache] token:", token)
-	err = mgr.SealFileAtCache(fileName, token, int32(len(ossData)))
-	// TODO(csun): if the error is conflict, return
+	log.Println("[dowloadAndWriteCache] token:", token)
+	err = mgr.SealFileAtCache(pendingFid, token, int32(len(ossData)))
+	// TODO: if the error is conflict, return
 	if err != nil {
 		log.Fatalln(err)
 	}
 }
 
-func (mgr *CacheManager) WriteToCache(fid string, state int32, ossData []byte) (string, error) {
+func (mgr *CacheManager) WriteToCache(
+	fid string, state int32, ossData []byte) (string, error) {
 	fw := file_handler.FileWriter{
 		Pbh:    mgr.pbh,
-		FileDb: &mgr.dbOpsFile,
+		FileDb: mgr.dbOpsFile,
 	}
 	token := ""
 	var err error
@@ -118,10 +185,11 @@ func (mgr *CacheManager) WriteToCache(fid string, state int32, ossData []byte) (
 	return token, nil
 }
 
-func (mgr *CacheManager) SealFileAtCache(fid string, token string, size int32) error {
-	err := mgr.dbOpsFile.CommitCacheFileInDB(fid, token, size)
+func (mgr *CacheManager) SealFileAtCache(pFid string, token string, size int32) error {
+	err := mgr.dbOpsFile.CommitCacheFileInDB(
+		pFid, PendingToNormalFid(pFid), token, size)
 	if err != nil {
-		log.Printf("[ERROR] SealFileAtCache: Seal file(%s) failed.", fid)
+		log.Printf("[ERROR] SealFileAtCache: Seal file(%s) failed.", pFid)
 		return err
 	}
 	return nil
@@ -136,16 +204,16 @@ func CheckUrl(arg string) (bool, int64) {
 		log.Println("[CheckUrl] error: ", err)
 		return false, 0
 	}
-	log.Printf("[HttpReadFromCache] check url =%v finish \n", arg)
+	log.Printf("[CheckUrl] check url =%v finish \n", arg)
 	if resp.StatusCode == 404 {
-		log.Printf("[HttpReadFromCache] url: %s is not exist\n", arg)
+		log.Printf("[CheckUrl] url: %s is not exist\n", arg)
 		resp.Body.Close()
 		return false, 0
 	}
 	contentlength := resp.ContentLength
-	log.Printf("[HttpReadFromCache] url: %s size: %v\n", arg, contentlength)
+	log.Printf("[CheckUrl] url: %s size: %v\n", arg, contentlength)
 	if contentlength >= definition.F_CACHE_MAX_SIZE {
-		log.Printf("[HttpReadFromCache] url: %s is larger than 100G\n", arg)
+		log.Printf("[CheckUrl] url: %s is larger than 100G\n", arg)
 		resp.Body.Close()
 		return false, 0
 	}

@@ -1,7 +1,6 @@
-/////////////////////////////////////////
-// 2022 PJLab Storage all rights reserved
-// Author: Chen Sun
-/////////////////////////////////////////
+// //////////////////////////////
+// 2022 SHLab all rights reserved
+// //////////////////////////////
 
 package file_handler
 
@@ -90,11 +89,6 @@ func (fu *FileWriter) Close(fid string) error {
 func (fu *FileWriter) checkUploader() {
 	if fu.Pbh == nil {
 		log.Fatal("writer: FileWriter init not finished: Pbh")
-	}
-	if fu.BlobSegDb == nil {
-		if !dbops.IsOss {
-			log.Fatal("writer: FileWriter init not finished: BlobSegDb")
-		}
 	}
 	if fu.FileDb == nil {
 		log.Fatal("writer: FileWriter init not finished: FileDb")

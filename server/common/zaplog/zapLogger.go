@@ -1,13 +1,13 @@
-// ///////////////////////////////////////
-// 2022 PJLab Storage all rights reserved
-// Author: Yangyang Qian
-// ///////////////////////////////////////
+// //////////////////////////////
+// 2022 SHLab all rights reserved
+// //////////////////////////////
 package zaplog
 
 import (
 	"fmt"
-	"go.uber.org/zap"
 	"os"
+
+	"go.uber.org/zap"
 )
 
 var ZapLogger *zap.Logger

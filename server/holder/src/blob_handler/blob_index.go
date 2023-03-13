@@ -1,7 +1,6 @@
-/////////////////////////////////////////
-// 2022 PJLab Storage all rights reserved
-// Author: Chen Sun
-/////////////////////////////////////////
+// //////////////////////////////
+// 2022 SHLab all rights reserved
+// //////////////////////////////
 
 package blob_handler
 
@@ -12,12 +11,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/common/definition"
 	"log"
 	"os"
 	"strings"
 	"sync"
 	"unsafe"
+
+	"github.com/common/definition"
 )
 
 // All state must add their value upon base to get actual state value.
@@ -32,11 +32,11 @@ const K_index_entry_len = 252
 // Analogy: row in a list.
 type IndexEntry struct {
 	// maxlen = 128
-	BlobId   string 
+	BlobId string
 	//maxlen = 22
-	Offset   int64  
+	Offset int64
 	//maxlen = 22
-	Size     int64  
+	Size     int64
 	Checksum string
 	Fid      string
 	Padding  string
@@ -100,7 +100,7 @@ func (ih *IndexHeader) New(shardId int, triId string, isLarge bool) int64 {
 	ih.Empty = true
 	localfsPrefix := definition.BlobLocalPathPrefix
 	if localfsPrefix == "" {
-		localfsPrefix = "/tmp/localfs/"
+		localfsPrefix = "/var/lib/docker/.cache"
 	}
 	ih.LocalName = fmt.Sprintf("%s/idx_h_%d_%s.dat", localfsPrefix, shardId, triId)
 	info, err := os.Stat(ih.LocalName)
@@ -287,12 +287,12 @@ func (ih *IndexHeader) flush(entry IndexEntry) (int64, error) {
 		return 0, err
 	}
 	if !ih.Empty {
-	    if int64(res) - 1 != K_index_entry_len {
-			log.Fatalf("[INDEX FLUSH ERROR] : datalen %v is not equal to size %v\n", int64(res) - 1, K_index_entry_len)
+		if int64(res)-1 != K_index_entry_len {
+			log.Fatalf("[INDEX FLUSH ERROR] : datalen %v is not equal to size %v\n", int64(res)-1, K_index_entry_len)
 		}
-	}else{
-	    if int64(res) - 1 != K_index_entry_len -2 {
-			log.Fatalf("[INDEX FLUSH ERROR] : datalen %v is not equal to size %v\n", int64(res) - 1, K_index_entry_len-2)
+	} else {
+		if int64(res)-1 != K_index_entry_len-2 {
+			log.Fatalf("[INDEX FLUSH ERROR] : datalen %v is not equal to size %v\n", int64(res)-1, K_index_entry_len-2)
 		}
 	}
 	ih.Empty = false

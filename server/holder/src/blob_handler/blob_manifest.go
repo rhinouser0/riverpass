@@ -1,18 +1,18 @@
-/////////////////////////////////////////
-// 2022 PJLab Storage all rights reserved
-// Author: Chen Sun
-/////////////////////////////////////////
+// //////////////////////////////
+// 2022 SHLab all rights reserved
+// //////////////////////////////
 
 package blob_handler
 
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/common/definition"
 	"log"
 	"os"
 	"strings"
 	"sync"
+
+	"github.com/common/definition"
 )
 
 // Note that a manifest file never close, since it has deletion operation
@@ -68,7 +68,7 @@ func (mfh *MFHeader) New(shardId int, triId string) int64 {
 
 	localfsPrefix := definition.BlobLocalPathPrefix
 	if localfsPrefix == "" {
-		localfsPrefix = "/tmp/localfs/"
+		localfsPrefix = "/var/lib/docker/.cache"
 	}
 	mfh.LocalName = fmt.Sprintf("%s/%s", localfsPrefix, fileName)
 
@@ -170,7 +170,7 @@ func (mfh *MFHeader) flush(entry *MFEntry) (int64, error) {
 
 	leading := make([]byte, 0)
 	if !mfh.Empty {
-	    leading = []byte(",\n")
+		leading = []byte(",\n")
 	}
 	serializeBytes := entry.Serialize()
 	paddingLen := K_mf_entry_len - len(serializeBytes) - 2
@@ -186,12 +186,12 @@ func (mfh *MFHeader) flush(entry *MFEntry) (int64, error) {
 		return 0, err
 	}
 	if !mfh.Empty {
-	    if int64(res) - 1 != K_mf_entry_len {
-			log.Fatalf("[MF FLUSH ERROR] : datalen %v is not equal to size %v\n", int64(res) - 1, K_mf_entry_len)
+		if int64(res)-1 != K_mf_entry_len {
+			log.Fatalf("[MF FLUSH ERROR] : datalen %v is not equal to size %v\n", int64(res)-1, K_mf_entry_len)
 		}
-	}else{
-	    if int64(res) - 1 != K_mf_entry_len -2 {
-			log.Fatalf("[MF FLUSH ERROR] : datalen %v is not equal to size %v\n", int64(res) - 1, K_mf_entry_len-2)
+	} else {
+		if int64(res)-1 != K_mf_entry_len-2 {
+			log.Fatalf("[MF FLUSH ERROR] : datalen %v is not equal to size %v\n", int64(res)-1, K_mf_entry_len-2)
 		}
 	}
 	mfh.Empty = false

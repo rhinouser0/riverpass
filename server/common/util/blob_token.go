@@ -1,5 +1,10 @@
+// //////////////////////////////
+// 2022 SHLab all rights reserved
+// //////////////////////////////
 package util
+
 import "regexp"
+
 func GenerateTriId() string {
 	return ShordGuidGenerator()
 }

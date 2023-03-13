@@ -1,7 +1,6 @@
-/////////////////////////////////////////
-// 2022 PJLab Storage all rights reserved
-// Author: Chen Sun
-/////////////////////////////////////////
+// //////////////////////////////
+// 2022 SHLab all rights reserved
+// //////////////////////////////
 
 package file_handler
 
@@ -77,7 +76,7 @@ func (fr *FileReader) ReadFromCache(
 	end := rngCodeList.Front().Value.(range_code.RangeCode).End
 	token := rngCodeList.Front().Value.(range_code.RangeCode).Token
 	allBytes := make([]byte, size)
-	if end < offset || start > offset || offset + size > end{
+	if end < offset || start > offset || offset+size > end {
 		log.Println("WARNING!!!  index out of range!")
 	}
 	var curBlobData []byte

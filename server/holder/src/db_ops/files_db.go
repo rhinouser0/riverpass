@@ -1,7 +1,6 @@
-/////////////////////////////////////////
-// 2022 PJLab Storage all rights reserved
-// Author: Chen Sun, Chao Qin
-/////////////////////////////////////////
+// //////////////////////////////
+// 2022 SHLab all rights reserved
+// //////////////////////////////
 
 package db_ops
 
@@ -36,7 +35,7 @@ type DBOpsFile struct {
 	ConnLeft int
 }
 
-func (opsFile *DBOpsFile) Init() {
+func (opsFile *DBOpsFile) New() {
 	ZapLogger.Debug("", zap.String("driverName", driverName),
 		zap.String("dataSourceName", dataSourceName))
 
@@ -67,7 +66,7 @@ func (opsFile *DBOpsFile) GetConnForTxn() *sql.DB {
 
 func (opsFile *DBOpsFile) GetConn() (*sql.DB, error) {
 	if opsFile.mc == nil {
-		opsFile.Init()
+		return nil, errors.New("initialization incomplete")
 	}
 	opsFile.RWLock.Lock()
 	defer opsFile.RWLock.Unlock()
@@ -245,8 +244,6 @@ func (opsFile *DBOpsFile) ListFileFromDB(fileId string, state int32) (*definitio
 
 	//DBres handle
 	fm = DBFileMeta2FileMeta(&dbfm)
-	log.Print("[DEBUG] dbfm:", dbfm, "OwnerList:", dbfm.OwnerList,
-		"\n\tfm:", fm, "OwnerList:", fm.OwnerList, "\n")
 	return &fm, nil
 }
 
@@ -424,7 +421,8 @@ func (opsFile *DBOpsFile) CommitFileInDB(fid string) error {
 
 // Check file if it's full moon (all ranges are filled). If yes, update file state.
 // TODO: If too many blobs, easily this query slow & timeout.
-func (opsFile *DBOpsFile) CommitCacheFileInDB(fid string, token string, size int32) error {
+func (opsFile *DBOpsFile) CommitCacheFileInDB(
+	pFid string, normalFid, token string, size int32) error {
 	// Prepare ctx for executing query.
 	var ctx context.Context
 	ctx, stop := context.WithCancel(context.Background())
@@ -442,11 +440,11 @@ func (opsFile *DBOpsFile) CommitCacheFileInDB(fid string, token string, size int
 	// Query file entry to fetch lunar hash list.
 	row, qErr := tx.QueryContext(ctx,
 		"SELECT file_meta FROM "+dbConfigInfo.FileTableName+" WHERE fid = ? FOR UPDATE",
-		fid)
+		pFid)
 	if qErr != nil {
 		log.Printf(
 			"[ERROR] CommitCacheFileInDB Lock file(%s) in DB failed: %v",
-			fid, qErr)
+			pFid, qErr)
 		return qErr
 	}
 	// Extract file meta.
@@ -487,10 +485,12 @@ func (opsFile *DBOpsFile) CommitCacheFileInDB(fid string, token string, size int
 		return jsErr
 	}
 	_, qErr = tx.ExecContext(
-		ctx, "UPDATE "+dbConfigInfo.FileTableName+" SET state = ?, owners = ?,file_meta = ? WHERE fid = ?", definition.F_DB_STATE_READY, tid, encoded, fid)
+		ctx,
+		"UPDATE "+dbConfigInfo.FileTableName+" SET fid = ?, state = ?, owners = ?,file_meta = ? WHERE fid = ?",
+		normalFid, definition.F_DB_STATE_READY, tid, encoded, pFid)
 	if qErr != nil {
 		log.Printf(
-			"[ERROR] CommitCacheFileInDB failed on fid(%s): %v", fid, qErr)
+			"[ERROR] CommitCacheFileInDB failed on fid(%s): %v", pFid, qErr)
 		return qErr
 	}
 
@@ -498,7 +498,7 @@ func (opsFile *DBOpsFile) CommitCacheFileInDB(fid string, token string, size int
 	if err = tx.Commit(); err != nil {
 		return err
 	}
-	log.Printf("[INFO] Successfully committed cache file in DB: %s", fid)
+	log.Printf("[INFO] Successfully committed cache file in DB: %s", pFid)
 	return nil
 }
 

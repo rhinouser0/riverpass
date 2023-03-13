@@ -1,7 +1,6 @@
-/////////////////////////////////////////
-// 2022 PJLab Storage all rights reserved
-// Author: Chen Sun
-/////////////////////////////////////////
+// //////////////////////////////
+// 2022 SHLab all rights reserved
+// //////////////////////////////
 
 package blob_handler
 
@@ -59,7 +58,7 @@ func (bh *BinHeader) New(shardId int, triId string) int64 {
 	bh.TripletId = triId
 	localfsPrefix := definition.BlobLocalPathPrefix
 	if localfsPrefix == "" {
-		localfsPrefix = "/tmp/localfs/"
+		localfsPrefix = "/var/lib/docker/.cache"
 	}
 	bh.LocalName =
 		fmt.Sprintf("%s/binary_%d_%s.dat", localfsPrefix, shardId, triId)

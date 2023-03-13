@@ -1,3 +1,7 @@
+// //////////////////////////////
+// 2022 SHLab all rights reserved
+// //////////////////////////////
+
 package definition
 
 const K_KiB = 1024
@@ -41,7 +45,9 @@ const F_CONTENT_SIZE = 4*K_KiB - F_BLOBID_SIZE - 8 - F_CHECKSUM_SIZE
 
 const K_LARGE_OBJECT_PREFIX = "lobj"
 
-// TODO(csun): For cache, uncategorized.
+// TODO: For cache, uncategorized.
 const K_PENDDING_FID_PREFIX = "PD_"
 const F_num_chars_pending_file_id = 4
 const F_num_batch_write = 5
+const F_cache_purge_waiting_ms = 500
+const F_cache_persistence_path = "/var/lib/docker/.cache"

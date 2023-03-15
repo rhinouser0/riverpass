@@ -237,7 +237,7 @@ func Encode4K(blobId string, data []byte) (encoded []byte) {
 		copy(tmp.ChunkHeader.BlobId[:], blbIdBytes)
 		//chunk.size
 		tmp.ChunkHeader.Size = size
-		//fake chunk.checksum
+		//TODO: fake chunk.checksum
 		fakeChecksum := []byte("12345678123456781234567812345678")
 		copy(tmp.ChunkHeader.Checksum[:], fakeChecksum)
 		//chunk.content

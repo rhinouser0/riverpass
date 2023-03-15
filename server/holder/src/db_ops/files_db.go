@@ -586,6 +586,22 @@ func (opsFile *DBOpsFile) DeleteFileWithTripleIdInDB(tripleId string) error {
 	return nil
 }
 
+func (opsFile *DBOpsFile) DeletePendingFileWithFIdInDB(fileId string) error {
+	// Prepare ctx for executing query.
+	var ctx context.Context
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	_, err := opsFile.GetConnWithRetry().ExecContext(ctx,
+		"DELETE FROM "+dbConfigInfo.FileTableName+" WHERE fid = ? AND state = ?;",
+		fileId, definition.F_BLOB_STATE_PENDING)
+	opsFile.ReleaseConn()
+	if err != nil {
+		log.Printf("[ERROR][DeletePendingFileWithFIdInDB] DELETE pending file by fileId(%s) to DB failed: %v", fileId, err)
+		return err
+	}
+	return nil
+}
+
 func (opsFile *DBOpsFile) DeleteAllPendingFileInDB() error {
 	// Prepare ctx for executing query.
 	var ctx context.Context

@@ -4,11 +4,9 @@
 package blob_handler
 
 import (
-	db_ops "holder/src/db_ops"
 	"sync"
 
 	. "github.com/common/zaplog"
-	_ "github.com/common/zaplog"
 	"go.uber.org/zap"
 )
 
@@ -20,13 +18,12 @@ type Node struct {
 }
 
 type LruCache struct {
-	dbOpsFile db_ops.DBOpsFile
-	dict      sync.Map
-	head      *Node
-	tail      *Node
-	size      int
-	listLock  sync.Mutex
-	rwLock    sync.RWMutex
+	dict     sync.Map
+	head     *Node
+	tail     *Node
+	size     int
+	listLock sync.Mutex
+	rwLock   sync.RWMutex
 }
 
 func (c *LruCache) New() {
@@ -93,13 +90,20 @@ func (c *LruCache) removeTail() *Node {
 	node := c.tail.prev
 	node.prev.next = node.next
 	node.next.prev = node.prev
+	c.size--
 	return node
 }
 
+// get current tail's name and remove tail
 func (c *LruCache) GetCurTailNameForEvict() string {
 	c.listLock.Lock()
 	defer c.listLock.Unlock()
-	return c.tail.key
+	res := c.tail.prev.key
+	node := c.tail.prev
+	node.prev.next = node.next
+	node.next.prev = node.prev
+	c.size--
+	return res
 }
 
 func (c *LruCache) GetSize() int {

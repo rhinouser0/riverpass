@@ -7,8 +7,10 @@ package cache_ops
 import (
 	"bytes"
 	"io"
+	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -158,6 +160,8 @@ func (mgr *CacheManager) dowloadAndWriteCache(
 	if err != nil {
 		if strings.Contains(err.Error(), "cache full") {
 			mgr.EnqueueDeletionReq()
+			// TODO: rollback in background
+			// mgr.RollbackFileInDB(pendingFid)
 			return
 		} else {
 			log.Fatalln(err)
@@ -195,56 +199,95 @@ func (mgr *CacheManager) SealFileAtCache(pFid string, token string, size int32) 
 	return nil
 }
 
+// rollback file meta in db, if write cache failed
+func (mgr *CacheManager) RollbackFileInDB(pFid string) error {
+	err := mgr.dbOpsFile.DeletePendingFileWithFIdInDB(pFid)
+	if err != nil {
+		log.Printf("[ERROR] RollbackFileInDB: rollback file(%s) failed.", pFid)
+		return err
+	}
+	log.Printf("rollback with pFid: %s", pFid)
+	return nil
+}
+
 // Utility function
 func CheckUrl(arg string) (bool, int64) {
 	//check url
-	resp, err := http.Head(arg)
-	if err != nil {
-		// maybe timeout , cannot crash the server.
+	if definition.F_local_mode {
+		stat, err := os.Stat(arg)
+		if err == nil {
+			return true, stat.Size()
+		}
+		if os.IsNotExist(err) {
+			log.Printf("[CheckUrl] local file %v not found\n", arg)
+			return false, 0
+		}
 		log.Println("[CheckUrl] error: ", err)
 		return false, 0
-	}
-	log.Printf("[CheckUrl] check url =%v finish \n", arg)
-	if resp.StatusCode == 404 {
-		log.Printf("[CheckUrl] url: %s is not exist\n", arg)
+
+	} else {
+		resp, err := http.Head(arg)
+		if err != nil {
+			// maybe timeout , cannot crash the server.
+			log.Println("[CheckUrl] error: ", err)
+			return false, 0
+		}
+		log.Printf("[CheckUrl] check url =%v finish \n", arg)
+		if resp.StatusCode == 404 {
+			log.Printf("[CheckUrl] url: %s is not exist\n", arg)
+			resp.Body.Close()
+			return false, 0
+		}
+		contentlength := resp.ContentLength
+		log.Printf("[CheckUrl] url: %s size: %v\n", arg, contentlength)
+		if contentlength >= definition.F_CACHE_MAX_SIZE {
+			log.Printf("[CheckUrl] url: %s is larger than %d MB\n", arg, definition.F_CACHE_MAX_SIZE/1024/1024)
+			resp.Body.Close()
+			return false, 0
+		}
 		resp.Body.Close()
-		return false, 0
+		return true, contentlength
 	}
-	contentlength := resp.ContentLength
-	log.Printf("[CheckUrl] url: %s size: %v\n", arg, contentlength)
-	if contentlength >= definition.F_CACHE_MAX_SIZE {
-		log.Printf("[CheckUrl] url: %s is larger than 100G\n", arg)
-		resp.Body.Close()
-		return false, 0
-	}
-	resp.Body.Close()
-	return true, contentlength
 }
 
 // Utility function
 func (mgr *CacheManager) DownLoad(url string, ossDataLen int64) []byte {
 	// Get the data
-	resp, err := http.Get(url)
-	if err != nil {
-		panic(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == 404 {
-		log.Println("[DownLoad] ossData not found")
-		return nil
-	}
-	var buf bytes.Buffer
-	_, err = io.Copy(&buf, resp.Body)
-	ossData := buf.Bytes()
-	if err != nil {
-		log.Println("[DownLoad] error: ", err)
-		if len(ossData) != int(ossDataLen) {
-			log.Println("[DownLoad] error: datalen %v is not equal to size %v\n", len(ossData), int(ossDataLen))
+	if definition.F_local_mode { // only for test
+		data, error := ioutil.ReadFile(url)
+		if error != nil {
+			log.Println("read local file failed: ", error)
 			return nil
 		}
+		if len(data) != int(ossDataLen) {
+			log.Printf("[DownLoad] error: datalen %v is not equal to size %v\n", len(data), int(ossDataLen))
+			return nil
+		}
+		return data
+
+	} else {
+		resp, err := http.Get(url)
+		if err != nil {
+			panic(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode == 404 {
+			log.Println("[DownLoad] ossData not found")
+			return nil
+		}
+		var buf bytes.Buffer
+		_, err = io.Copy(&buf, resp.Body)
+		ossData := buf.Bytes()
+		if err != nil {
+			log.Println("[DownLoad] error: ", err)
+			if len(ossData) != int(ossDataLen) {
+				log.Printf("[DownLoad] error: datalen %v is not equal to size %v\n", len(ossData), int(ossDataLen))
+				return nil
+			}
+		}
+		log.Printf("[DownLoad] ossData len %v\n", len(ossData))
+		return ossData
 	}
-	log.Printf("[DownLoad] ossData len %v\n", len(ossData))
-	return ossData
 }
 
 // Utility function

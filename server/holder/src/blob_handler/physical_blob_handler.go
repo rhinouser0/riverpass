@@ -156,17 +156,16 @@ func (pbh *PhyBH) New(shardId int, fdb *dbops.DBOpsFile) {
 
 func (pbh *PhyBH) PurgeTriplet(tpltId string) {
 	pbh.ClosedTplt.DeleteFromCache(tpltId)
-	pbh.ClosedTplt.DeleteFromCache(tpltId)
+	pbh.LargeObjTplt.DeleteFromCache(tpltId)
 	atomic.AddInt64(&pbh.totalBytes, ^int64(DeleteTripletFilesOnDisk(tpltId)-1))
 }
 
 // TODO: always purge small object tplt first. Need to change to more
 // wise logic.
 func (pbh *PhyBH) GetTailNameForEvict() (string, error) {
-	if pbh.ClosedTplt.size != 0 {
+	if pbh.ClosedTplt.size > 0 {
 		return pbh.ClosedTplt.GetCurTailNameForEvict(), nil
-	}
-	if pbh.ClosedTplt.size == 0 {
+	} else if pbh.LargeObjTplt.size > 0 {
 		return pbh.LargeObjTplt.GetCurTailNameForEvict(), nil
 	}
 	return "", errors.New("no tail to purge")
@@ -423,6 +422,7 @@ func DeleteTripletFilesOnDisk(tripleId string) int64 {
 	binName := fmt.Sprintf("%s/binary_%d_%s.dat", localfsPrefix, shardId, tripleId)
 	idxName := fmt.Sprintf("%s/idx_h_%d_%s.dat", localfsPrefix, shardId, tripleId)
 	mfName := fmt.Sprintf("%s/mf_h_%d_%s.dat", localfsPrefix, shardId, tripleId)
+	log.Println("remove files of tripId", tripleId)
 	res += RemoveFile(binName) + RemoveFile(idxName) + RemoveFile(mfName)
 	return res
 }

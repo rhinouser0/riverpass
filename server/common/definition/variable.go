@@ -36,5 +36,8 @@ var K_triplet_closing_threshold int64
 // Large object
 var K_triplet_large_threshold int64
 
+// Local Mode for test
+var F_local_mode bool
+
 // common end
 ////////////////////////////////////////

@@ -42,10 +42,14 @@ func argsfunc() {
 	for idx, args := range os.Args {
 		log.Println("    param", strconv.Itoa(idx), ":", args)
 	}
-	var err error
-	ShardID, err = strconv.Atoi(os.Args[1])
-	if err != nil {
-		log.Fatalln(err)
+	if len(os.Args) >= 2 {
+		var err error
+		ShardID, err = strconv.Atoi(os.Args[1])
+		if err != nil {
+			log.Fatalln(err)
+		}
+	} else {
+		ShardID = 0
 	}
 }
 

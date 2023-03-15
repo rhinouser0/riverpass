@@ -24,6 +24,7 @@ type OssCommonConfigs struct {
 	TripletClosingThreshold int    `xml:"oss_triplet_closing_threshold_mb"`
 	TripletLargeThreshold   int    `xml:"oss_triplet_large_threshold_mb"`
 	DbNum                   uint32 `xml:"oss_db_num"`
+	LocalMode               bool   `xml:"local_mode"`
 }
 
 type OssHolderConfigs struct {
@@ -79,11 +80,13 @@ func (cfg *OssConfig) ParseXMLConfig2Definition() {
 	definition.F_CACHE_MAX_SIZE = int64(definition.K_MiB) * cfg.OssCommonConfigs.CacheMaxSizeMB
 	definition.K_triplet_closing_threshold = int64(cfg.OssCommonConfigs.TripletClosingThreshold) * int64(definition.K_MiB)
 	definition.K_triplet_large_threshold = int64(cfg.OssCommonConfigs.TripletLargeThreshold) * int64(definition.K_MiB)
+	definition.F_local_mode = cfg.OssCommonConfigs.LocalMode
 	log.Println("Oss_dbNum : ", definition.Oss_dbNum)
 	log.Println("F_4K_Align : ", definition.F_4K_Align)
 	log.Println("F_CACHE_MAX_SIZE : ", definition.F_CACHE_MAX_SIZE)
 	log.Println("K_triplet_closing_threshold : ", definition.K_triplet_closing_threshold)
 	log.Println("K_triplet_large_threshold : ", definition.K_triplet_large_threshold)
+	log.Println("F_local_mode : ", definition.F_local_mode)
 }
 
 func (cfg *OssConfig) ParseOssHolderConfigAddress(_shardID int) string {

@@ -78,7 +78,7 @@ func init() {
 	}
 	Address = cfg.ParseOssHolderConfigAddress(ShardID)
 
-	// Object intializations...
+	// Object initalizations...
 	FDb = new(db_ops.DBOpsFile)
 	FDb.New()
 	ZapLogger.Debug("[init] DBOpsFile initialization finished:",

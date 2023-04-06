@@ -62,11 +62,12 @@ func (bh *BinHeader) New(shardId int, triId string) int64 {
 	}
 	bh.LocalName =
 		fmt.Sprintf("%s/binary_%d_%s.dat", localfsPrefix, shardId, triId)
-	info, _ := os.Stat(bh.LocalName)
-	// TODO: stat error not necessary means file doesn't exist
-	if info == nil {
+	info, err := os.Stat(bh.LocalName)
+	if os.IsNotExist(err) {
 		bh.CurOff = 0
 		return 0
+	} else if err != nil {
+		log.Fatalln("[BinHeader] NEW error ", err)
 	}
 	bh.CurOff = info.Size()
 	return info.Size()

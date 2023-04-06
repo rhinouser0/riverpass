@@ -15,6 +15,7 @@ import (
 	"math/rand"
 	"os"
 	"regexp"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -54,9 +55,10 @@ type PhyBH struct {
 	ClosedTplt   *LruCache
 	LargeObjTplt *LruCache
 	// Protected by atomic operations.
-	// TODO: fix the bug using counter pre-allocate rather than post-allocation
 	totalBytes int64
-	FDb        *dbops.DBOpsFile
+	// mtx is used by totalBytes
+	mtx sync.Mutex
+	FDb *dbops.DBOpsFile
 }
 
 func (tri *Triplet) New(shardId int, triId string, isLarge bool) int64 {
@@ -182,17 +184,21 @@ func (pbh *PhyBH) Put(blbId string, data []byte) (token string, err error) {
 	maxAllocSize := K_empty_idxmf_file_overhead + payloadSize +
 		K_index_entry_len + K_mf_entry_len + 4
 
+	pbh.mtx.Lock()
 	if maxAllocSize > definition.F_CACHE_MAX_SIZE-atomic.LoadInt64(&pbh.totalBytes) {
+		pbh.mtx.Unlock()
 		return "", errors.New("cache full")
 	}
-	// Intentionally no locking to avoid hurting concurrency: we don't think
-	// the write skew could be very bad.
+	atomic.AddInt64(&pbh.totalBytes, maxAllocSize)
+	pbh.mtx.Unlock()
+
 	var triplet *Triplet
 
+	var increaseBytes int64 = 0
 	if payloadSize > definition.K_triplet_large_threshold {
 		var size int64
 		triplet, size = pbh.openNewTplt(true)
-		atomic.AddInt64(&pbh.totalBytes, size)
+		increaseBytes += size
 		pbh.LargeObjTplt.Put(triplet.Id, triplet)
 		log.Printf("[INFO] PhyBH: Large triplet has created, id: %s", triplet.Id)
 		token = definition.K_LARGE_OBJECT_PREFIX +
@@ -221,21 +227,27 @@ func (pbh *PhyBH) Put(blbId string, data []byte) (token string, err error) {
 	// step 1: Persist in binary. Flush must succeed.
 	offset, size := triplet.BinHeader.Put(blbId, data)
 	if size != payloadSize {
-		log.Fatalf("[ERROR] PhyBH: datalen %v is not equal to size %v\n", payloadSize, size)
+		atomic.AddInt64(&pbh.totalBytes, ^int64(maxAllocSize-1))
+		log.Printf("[ERROR] PhyBH: datalen %v is not equal to size %v\n", payloadSize, size)
+		return "", errors.New("BinHeader put error")
 	}
 	// step 2: Store the idx in memory; Flush must succeed
 	idxBytes, idxErr := triplet.IdxHeader.Put(blbId, offset, size)
 	if idxErr != nil {
+		atomic.AddInt64(&pbh.totalBytes, ^int64(maxAllocSize-1))
+		log.Println("[ERROR] PhyBH: idxErr: ", idxErr)
 		return "", idxErr
 	}
 	// step 3: Persist action in MF. Flush may or may not succeed
 	mfBytes, mfErr := triplet.MFHeader.Put(blbId)
 	if mfErr != nil {
-		log.Fatalln("[ERROR] PhyBH: mfERROR", mfErr)
+		atomic.AddInt64(&pbh.totalBytes, ^int64(maxAllocSize-1))
+		log.Println("[ERROR] PhyBH: mfERROR", mfErr)
+		return "", mfErr
 	}
-	atomic.AddInt64(&pbh.totalBytes, int64(payloadSize)+idxBytes+mfBytes)
-	log.Printf("[INFO] PhyBH: Put blob succeeded, token[%s], totalBytes[%v] \n",
-		token, atomic.LoadInt64(&pbh.totalBytes))
+	increaseBytes += int64(payloadSize) + idxBytes + mfBytes
+	atomic.AddInt64(&pbh.totalBytes, increaseBytes)
+	atomic.AddInt64(&pbh.totalBytes, ^int64(maxAllocSize-1))
 	return token, nil
 }
 

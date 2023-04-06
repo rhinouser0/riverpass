@@ -73,9 +73,10 @@ func (mfh *MFHeader) New(shardId int, triId string) int64 {
 	mfh.LocalName = fmt.Sprintf("%s/%s", localfsPrefix, fileName)
 
 	info, err := os.Stat(mfh.LocalName)
-	// TODO: stat error not necessary means file doesn't exist
-	if err != nil {
+	if os.IsNotExist(err) {
 		return mfh.create()
+	} else if err != nil {
+		log.Fatalln("[MFHeader] NEW error ", err)
 	}
 	mfh.load(info.Size())
 	return info.Size()

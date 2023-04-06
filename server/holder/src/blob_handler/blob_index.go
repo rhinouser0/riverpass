@@ -104,8 +104,8 @@ func (ih *IndexHeader) New(shardId int, triId string, isLarge bool) int64 {
 	}
 	ih.LocalName = fmt.Sprintf("%s/idx_h_%d_%s.dat", localfsPrefix, shardId, triId)
 	info, err := os.Stat(ih.LocalName)
-	// TODO: stat error not necessary means file doesn't exist
-	if err != nil {
+
+	if os.IsNotExist(err) {
 		if isLarge {
 			state := K_index_header_large + K_state_base_ascii
 			return ih.create(uint8(state))
@@ -113,6 +113,8 @@ func (ih *IndexHeader) New(shardId int, triId string, isLarge bool) int64 {
 			state := K_index_header_open + K_state_base_ascii
 			return ih.create(uint8(state))
 		}
+	} else if err != nil {
+		log.Fatalln("[IndexHeader] NEW error ", err)
 	}
 	ih.load(info.Size())
 	if len(ih.RefMap) > 0 {

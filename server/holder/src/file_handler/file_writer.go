@@ -69,11 +69,10 @@ func (fu *FileWriter) WriteFileToCache(fid string, data []byte) (string, error) 
 	// TODO: Implement blacklist gc.
 	fullToken, err := fu.Pbh.Put(blobId, data)
 	if err != nil {
-		log.Printf("[ERROR] writer: Put data failed for fid(%s).", fid)
+		log.Printf("[ERROR] writer: Put data failed for fid(%s), error: %s", fid, err)
 		return "", err
 	}
 	log.Printf("[INFO] writer: Put data succeeded for fid(%s), token: %s", fid, fullToken)
-	log.Printf("[INFO] writer: Successfully put blob(token: %s) to file(%s)", fullToken, fid)
 	return fullToken, nil
 }
 

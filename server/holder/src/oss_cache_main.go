@@ -114,12 +114,22 @@ func RegisterHttpHandler() {
 }
 
 func HttpRead(w http.ResponseWriter, r *http.Request) {
-	var arg string
+	var url string
 	values := r.URL.Query()
-	arg = values.Get("url")
-	log.Printf("[HttpRead] url=%v\n", arg)
+	url = values.Get("url")
+	log.Printf("[HttpRead] url=%v\n", url)
+	resp, err := http.Get(url)
+	if err != nil {
+		panic(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		log.Printf("url: %s is not available\n", url)
+		w.WriteHeader(404)
+		return
+	}
 	//offset := 0,size := 0 means read all data from 0 to len(data).
-	data, err := OssServer.TryReadFromCache(arg, 0, 0)
+	data, err := OssServer.TryReadFromCache(url, 0, 0)
 	if err != nil {
 		log.Fatalln(err)
 	}
@@ -130,7 +140,7 @@ func HttpRead(w http.ResponseWriter, r *http.Request) {
 		log.Println("[HttpRead] READ SUCCESSFULLY!")
 		h := w.Header()
 		h.Set("Content-type", "application/octet-stream")
-		h.Set("Content-Disposition", "attachment;filename="+arg)
+		h.Set("Content-Disposition", "attachment;filename="+url)
 		w.WriteHeader(200)
 		w.Write(data)
 	}

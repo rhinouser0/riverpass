@@ -94,5 +94,8 @@ func (fr *FileReader) ReadFromCache(
 func (fr *FileReader) readPiece(
 	token string, start int32, end int32) (piece []byte, err error) {
 	data, err := fr.Pbh.Get(token)
-	return data[start:end], err
+	if err != nil {
+		return nil, err
+	}
+	return data[start:end], nil
 }

@@ -247,6 +247,54 @@ func (opsFile *DBOpsFile) ListFileFromDB(fileId string, state int32) (*definitio
 	return &fm, nil
 }
 
+func (opsFile *DBOpsFile) ListFileAndStateFromDB(fileId string) (*definition.FileMeta, int, error) {
+	// Prepare ctx for executing query.
+	var ctx context.Context
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+
+	rows, qErr := opsFile.GetConnWithRetry().QueryContext(ctx,
+		"SELECT file_meta, state FROM "+dbConfigInfo.FileTableName+" WHERE fid = ?;",
+		fileId)
+	opsFile.ReleaseConn()
+
+	if qErr != nil {
+		log.Printf("[ERROR][ListFileAndStateFromDB] Query file_meta from DB by fid(%s) + failed: %v",
+			fileId, qErr)
+		return nil, -1, qErr
+	}
+	defer rows.Close()
+
+	var encoded []byte
+	var state int
+	if rows.Next() {
+		if err := rows.Scan(&encoded, &state); err != nil {
+			log.Fatal(err)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		log.Fatal(err)
+	}
+
+	if len(encoded) == 0 {
+		return nil, -1, nil
+	}
+
+	var fm definition.FileMeta
+	var dbfm DBFileMeta
+	jsErr := json.Unmarshal(encoded, &dbfm)
+	if jsErr != nil {
+		log.Printf(
+			"ERROR:[ListFileAndStateFromDB] Convert db string(%s) to dbfm failed: %v",
+			encoded, jsErr)
+		return nil, -1, jsErr
+	}
+
+	//DBres handle
+	fm = DBFileMeta2FileMeta(&dbfm)
+	return &fm, state, nil
+}
+
 func (opsFile *DBOpsFile) CreateFileWithFidInDB(fileId string, fileMeta *definition.FileMeta) error {
 	// Prepare ctx for executing query.
 	var ctx context.Context
@@ -422,7 +470,7 @@ func (opsFile *DBOpsFile) CommitFileInDB(fid string) error {
 // Check file if it's full moon (all ranges are filled). If yes, update file state.
 // TODO: If too many blobs, easily this query slow & timeout.
 func (opsFile *DBOpsFile) CommitCacheFileInDB(
-	pFid string, normalFid, token string, size int32) error {
+	fid, token string, size int32) error {
 	// Prepare ctx for executing query.
 	var ctx context.Context
 	ctx, stop := context.WithCancel(context.Background())
@@ -440,11 +488,11 @@ func (opsFile *DBOpsFile) CommitCacheFileInDB(
 	// Query file entry to fetch lunar hash list.
 	row, qErr := tx.QueryContext(ctx,
 		"SELECT file_meta FROM "+dbConfigInfo.FileTableName+" WHERE fid = ? FOR UPDATE",
-		pFid)
+		fid)
 	if qErr != nil {
 		log.Printf(
 			"[ERROR] CommitCacheFileInDB Lock file(%s) in DB failed: %v",
-			pFid, qErr)
+			fid, qErr)
 		return qErr
 	}
 	// Extract file meta.
@@ -486,11 +534,11 @@ func (opsFile *DBOpsFile) CommitCacheFileInDB(
 	}
 	_, qErr = tx.ExecContext(
 		ctx,
-		"UPDATE "+dbConfigInfo.FileTableName+" SET fid = ?, state = ?, owners = ?,file_meta = ? WHERE fid = ?",
-		normalFid, definition.F_DB_STATE_READY, tid, encoded, pFid)
+		"UPDATE "+dbConfigInfo.FileTableName+" SET state = ?, owners = ?,file_meta = ? WHERE fid = ?",
+		definition.F_DB_STATE_READY, tid, encoded, fid)
 	if qErr != nil {
 		log.Printf(
-			"[ERROR] CommitCacheFileInDB failed on fid(%s): %v", pFid, qErr)
+			"[ERROR] CommitCacheFileInDB failed on fid(%s): %v", fid, qErr)
 		return qErr
 	}
 
@@ -498,7 +546,7 @@ func (opsFile *DBOpsFile) CommitCacheFileInDB(
 	if err = tx.Commit(); err != nil {
 		return err
 	}
-	log.Printf("[INFO] Successfully committed cache file in DB: %s", pFid)
+	log.Printf("[INFO] Successfully committed cache file in DB: %s", fid)
 	return nil
 }
 

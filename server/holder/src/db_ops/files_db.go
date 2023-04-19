@@ -123,6 +123,8 @@ type DBFileMeta struct {
 	BlobId string
 
 	RngList string
+
+	Etag string
 }
 
 func DBFileMeta2FileMeta(dbfm *DBFileMeta) definition.FileMeta {
@@ -140,6 +142,7 @@ func DBFileMeta2FileMeta(dbfm *DBFileMeta) definition.FileMeta {
 		OwnerList:   ownerll,
 		BlobId:      dbfm.BlobId,
 		RngCodeList: rngll,
+		Etag:        dbfm.Etag,
 	}
 
 	if dbfm.RngList == "" {
@@ -178,6 +181,7 @@ func FileMeta2DBFileMeta(fm *definition.FileMeta) DBFileMeta {
 		// TODO: add the blob related code.
 		BlobId:  fm.BlobId,
 		RngList: "",
+		Etag:    fm.Etag,
 	}
 
 	if fm.RngCodeList == nil {
@@ -388,6 +392,37 @@ func (opsFile *DBOpsFile) UpdateFilemetaAndOwnerInDB(fileId string, dbfm *DBFile
 
 	if qErr != nil {
 		log.Printf("[ERROR][UpdateFilemetaAndOwnerInDB] UPDATE file_meta(%v), owners(%s) to DB failed: %v", dbfm, dbfm.OwnerList, qErr)
+		return qErr
+	}
+	defer rows.Close()
+
+	return nil
+}
+
+func (opsFile *DBOpsFile) UpdateFilemetaAndStateInDB(fileName string,
+	fileMeta *definition.FileMeta, state int) error {
+	// Prepare ctx for executing query.
+	var ctx context.Context
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	dbfm := FileMeta2DBFileMeta(fileMeta)
+
+	var encoded []byte
+	encoded, jsErr := json.Marshal(&dbfm)
+	if jsErr != nil {
+		log.Printf("[ERROR][UpdateFilemetaAndStateInDB]"+
+			"Convert file_meta(%v) to json string failed: %v", dbfm, jsErr)
+		return jsErr
+	}
+
+	rows, qErr := opsFile.GetConnWithRetry().QueryContext(ctx,
+		"UPDATE "+dbConfigInfo.FileTableName+" SET file_meta = ?, state = ? WHERE fid = ?;",
+		encoded, state, fileName)
+	opsFile.ReleaseConn()
+
+	if qErr != nil {
+		log.Printf("[ERROR][UpdateFilemetaAndStateInDB]"+
+			"UPDATE file_meta(%v), state(%d) to DB failed: %v", dbfm, state, qErr)
 		return qErr
 	}
 	defer rows.Close()

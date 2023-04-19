@@ -25,6 +25,9 @@ type FileMeta struct {
 	BlobId string
 	// A list of RangeCode
 	RngCodeList *list.List
+
+	// Etag of OSS object
+	Etag string
 }
 
 // Token can be used to access blob in triplet, or blob in cloud

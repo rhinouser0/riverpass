@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	blobs "holder/src/blob_handler"
+	"holder/src/cache_ops"
 	cache "holder/src/cache_ops"
 	_ "holder/src/db_ops"
 	db_ops "holder/src/db_ops"
@@ -130,8 +131,10 @@ func HttpRead(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(404)
 		return
 	}
+	// only support get Etag from oss object response's header
+	etag := resp.Header.Get("Etag")
 	//offset := 0,size := 0 means read all data from 0 to len(data).
-	data, err := OssServer.TryReadFromCache(url, 0, 0)
+	data, err := OssServer.TryReadFromCache(url, 0, 0, etag)
 	if err != nil {
 		log.Fatalln(err)
 	}
@@ -154,7 +157,7 @@ func (oSvr *OssHolderServer) New(cm *cache.CacheManager, fdb *db_ops.DBOpsFile) 
 }
 
 func (s *OssHolderServer) TryReadFromCache(
-	fileName string, offset int32, size int32) ([]byte, error) {
+	fileName string, offset int32, size int32, etag string) ([]byte, error) {
 	listTs := time.Now()
 	var fm *definition.FileMeta
 	// TODO: optimize this db lock
@@ -163,10 +166,9 @@ func (s *OssHolderServer) TryReadFromCache(
 	if err != nil {
 		log.Fatalln(err)
 	}
-	log.Println(fm)
 	if state == -1 {
 		// Didn't find the file in cache.
-		fid, err := s.CreateFileForCache(fileName)
+		fid, err := s.CreateFileForCache(fileName, etag)
 		if err != nil {
 			log.Fatalln(err)
 		}
@@ -180,6 +182,18 @@ func (s *OssHolderServer) TryReadFromCache(
 		log.Printf("Didn't find the file in cache(cache is downloading), file name: %s", fileName)
 		return nil, nil
 	} else if state == definition.F_BLOB_STATE_READY {
+		if fm == nil {
+			log.Printf("file meta is nil in db, file: %s", fileName)
+			return nil, errors.New("file meta is nil in db")
+		}
+		if etag != fm.Etag {
+			fm.Etag = etag
+			s.dbOpsFile.UpdateFilemetaAndStateInDB(fileName,
+				fm, definition.F_BLOB_STATE_PENDING)
+			log.Printf("Cache is outdate, redownload, file name: %s", fileName)
+			s.mgr.EnqueueWriteReq(fileName, fileName)
+			return nil, nil
+		}
 		// Read the file from cache.
 		fid := fileName
 		if fm.RngCodeList == nil {
@@ -228,11 +242,12 @@ func (s *OssHolderServer) ListFileAndState(fileName string) (*definition.FileMet
 	return fm, state, nil
 }
 
-func (s *OssHolderServer) CreateFileForCache(fileName string) (string, error) {
+func (s *OssHolderServer) CreateFileForCache(fileName string, etag string) (string, error) {
 	fm := definition.FileMeta{
 		Name:   fileName,
 		Id:     "",
 		BlobId: "",
+		Etag:   etag,
 	}
 	err := s.dbOpsFile.CreateFileWithFidInDB(fileName, &fm)
 	if err != nil {

@@ -13,6 +13,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/common/definition"
 )
@@ -138,9 +139,13 @@ func (bh *BinHeader) readBlob(blbId string, offset int64) (blobBody []byte) {
 
 	cntSize := DecodeSize(idAndSize[128:136])
 	bodyBytes := make([]byte, cntSize)
+	start := time.Now()
 	if _, err = f.ReadAt(bodyBytes, offset+136); err != nil {
 		log.Fatal(err)
 	}
+	duration := time.Now().Sub(start)
+	log.Printf("read file from cache, file name: %s, data size: %d, duration: %f s\n",
+		bh.LocalName, cntSize, duration.Seconds())
 
 	return bodyBytes
 }

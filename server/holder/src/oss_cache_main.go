@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 
 	config "github.com/common/config"
@@ -44,6 +45,7 @@ var RequestHandlers = map[string]func(http.ResponseWriter, *http.Request){
 type OssHolderServer struct {
 	mgr       *cache.CacheManager
 	dbOpsFile *db_ops.DBOpsFile
+	mtx       sync.Mutex
 }
 
 func argsfunc() {
@@ -155,61 +157,75 @@ func (s *OssHolderServer) TryReadFromCache(
 	fileName string, offset int32, size int32) ([]byte, error) {
 	listTs := time.Now()
 	var fm *definition.FileMeta
-	fm, err := s.ListFile(fileName, int32(definition.F_DB_STATE_READY))
+	// TODO: optimize this db lock
+	s.mtx.Lock()
+	fm, state, err := s.ListFileAndState(fileName)
 	if err != nil {
 		log.Fatalln(err)
 	}
 	log.Println(fm)
-	// Didn't find the file in cache.
-	if fm == nil {
-		pendingFid, err := s.CreateFileForCache(fileName)
+	if state == -1 {
+		// Didn't find the file in cache.
+		fid, err := s.CreateFileForCache(fileName)
 		if err != nil {
 			log.Fatalln(err)
 		}
-		s.mgr.EnqueueWriteReq(pendingFid, fileName)
+		s.mgr.EnqueueWriteReq(fid, fileName)
+		s.mtx.Unlock()
 		return nil, nil
 	}
-	// Read the file from cache.
-	fid := fileName
-	if fm.RngCodeList == nil {
-		log.Println("[TryReadFromCache] fm.RngCodeList is nil")
+	s.mtx.Unlock()
+	if state == definition.F_BLOB_STATE_PENDING {
+		// cache is downloading
+		log.Printf("Didn't find the file in cache(cache is downloading), file name: %s", fileName)
 		return nil, nil
+	} else if state == definition.F_BLOB_STATE_READY {
+		// Read the file from cache.
+		fid := fileName
+		if fm.RngCodeList == nil {
+			log.Println("[TryReadFromCache] fm.RngCodeList is nil")
+			return nil, nil
+		}
+		fr := files.FileReader{
+			Pbh:    PhyBH,
+			FileDb: s.dbOpsFile,
+		}
+		var readBytes []byte
+		offset = fm.RngCodeList.Front().Value.(range_code.RangeCode).Start
+		size = fm.RngCodeList.Front().Value.(range_code.RangeCode).End
+		log.Printf("[TryReadFromCache] read from start=%v  end=%v\n", offset, size)
+		if time.Now().Sub(listTs).Milliseconds() > definition.F_cache_purge_waiting_ms {
+			ZapLogger.Error("[TryReadFromCache] faild:",
+				zap.Any("fail to avoid stale cache data: ", fileName))
+			return nil, errors.New("data not in cache")
+		}
+		if readBytes, err = fr.ReadFromCache(fid, offset, size, fm.RngCodeList); err != nil {
+			ZapLogger.Error("[TryReadFromCache] faild:",
+				zap.Any("err", err))
+			return nil, err
+		}
+		return readBytes, nil
 	}
-
-	fr := files.FileReader{
-		Pbh:    PhyBH,
-		FileDb: s.dbOpsFile,
-	}
-	var readBytes []byte
-	offset = fm.RngCodeList.Front().Value.(range_code.RangeCode).Start
-	size = fm.RngCodeList.Front().Value.(range_code.RangeCode).End
-	log.Printf("[TryReadFromCache] read from start=%v  end=%v\n", offset, size)
-	if time.Now().Sub(listTs).Milliseconds() > definition.F_cache_purge_waiting_ms {
-		ZapLogger.Error("[TryReadFromCache] faild:",
-			zap.Any("fail to avoid stale cache data: ", fileName))
-		return nil, errors.New("data not in cache")
-	}
-	if readBytes, err = fr.ReadFromCache(fid, offset, size, fm.RngCodeList); err != nil {
-		ZapLogger.Error("[TryReadFromCache] faild:",
-			zap.Any("err", err))
-		return nil, err
-	}
-	return readBytes, nil
+	log.Printf("[ERROR] TryReadFromCache, file name: %s, state: %d", fileName, state)
+	return nil, errors.New("logical error, state is invalid.")
 }
 
 func (s *OssHolderServer) ListFile(fileName string, state int32) (*definition.FileMeta, error) {
 	var fm *definition.FileMeta
 	var err error
-	nameOrId := fileName
-	if state == definition.F_DB_STATE_INT32_PENDING {
-		nameOrId = cache.NormalFidToPending(fileName)
-	}
-
-	fm, err = s.dbOpsFile.ListFileFromDB(nameOrId, state)
+	fm, err = s.dbOpsFile.ListFileFromDB(fileName, state)
 	if err != nil {
 		return nil, err
 	}
 	return fm, nil
+}
+
+func (s *OssHolderServer) ListFileAndState(fileName string) (*definition.FileMeta, int, error) {
+	fm, state, err := s.dbOpsFile.ListFileAndStateFromDB(fileName)
+	if err != nil {
+		return nil, -1, err
+	}
+	return fm, state, nil
 }
 
 func (s *OssHolderServer) CreateFileForCache(fileName string) (string, error) {
@@ -218,15 +234,14 @@ func (s *OssHolderServer) CreateFileForCache(fileName string) (string, error) {
 		Id:     "",
 		BlobId: "",
 	}
-	pendingFid := cache.NormalFidToPending(fileName)
-	err := s.dbOpsFile.CreateFileWithFidInDB(pendingFid, &fm)
+	err := s.dbOpsFile.CreateFileWithFidInDB(fileName, &fm)
 	if err != nil {
 		log.Printf(
 			"[ERROR][CreateFileWithFid]: CreateFileWithFid to DB failed: %v",
 			err)
 		return "", err
 	}
-	return pendingFid, nil
+	return fileName, nil
 }
 
 // file_handler end

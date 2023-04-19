@@ -29,7 +29,9 @@ import (
 // 2. Need optimize the OSS download
 // 3. Need improving the cache eviction algorithm
 type CacheManager struct {
-	wMtx         sync.Mutex
+	wMtx sync.Mutex
+	// fileName->fid
+	// TODO: currently fid is fileName, so we can refactor writeItemMap.
 	writeItemMap map[string]string
 	wQueue       []string
 
@@ -55,14 +57,14 @@ func (mgr *CacheManager) New(fdb *db_ops.DBOpsFile, bh *blob.PhyBH) {
 }
 
 func (mgr *CacheManager) EnqueueWriteReq(
-	pendingFid string, fileName string) {
+	fid string, fileName string) {
 	mgr.wMtx.Lock()
 	defer mgr.wMtx.Unlock()
 	_, exist := mgr.writeItemMap[fileName]
 	if exist {
 		return
 	}
-	mgr.writeItemMap[fileName] = pendingFid
+	mgr.writeItemMap[fileName] = fid
 	mgr.wQueue = append(mgr.wQueue, fileName)
 }
 
@@ -96,9 +98,9 @@ func (mgr *CacheManager) loopBatchWrite() {
 		var namesAtHand = mgr.wQueue[:numToFetch]
 		mgr.wQueue = mgr.wQueue[numToFetch:]
 
-		var pendingFids []string
+		var fids []string
 		for _, name := range namesAtHand {
-			pendingFids = append(pendingFids, mgr.writeItemMap[name])
+			fids = append(fids, mgr.writeItemMap[name])
 			delete(mgr.writeItemMap, name)
 		}
 		mgr.wMtx.Unlock()
@@ -107,10 +109,10 @@ func (mgr *CacheManager) loopBatchWrite() {
 		wg := &sync.WaitGroup{}
 		for i, fileName := range namesAtHand {
 			wg.Add(1)
-			go func(filename string, pendingFid string) {
-				mgr.dowloadAndWriteCache(filename, pendingFid)
+			go func(filename string, fid string) {
+				mgr.dowloadAndWriteCache(filename, fid)
 				wg.Done()
-			}(fileName, pendingFids[i])
+			}(fileName, fids[i])
 		}
 		wg.Wait()
 	}
@@ -143,7 +145,7 @@ func (mgr *CacheManager) loopGarbageCollection() {
 }
 
 func (mgr *CacheManager) dowloadAndWriteCache(
-	fileName string, pendingFid string) {
+	fileName string, fid string) {
 	exist, ossDataLen := CheckUrl(fileName)
 	if !exist {
 		return
@@ -168,7 +170,7 @@ func (mgr *CacheManager) dowloadAndWriteCache(
 		}
 	}
 	log.Println("[dowloadAndWriteCache] token:", token)
-	err = mgr.SealFileAtCache(pendingFid, token, int32(len(ossData)))
+	err = mgr.SealFileAtCache(fid, token, int32(len(ossData)))
 	// TODO: if the error is conflict, return
 	if err != nil {
 		log.Fatalln(err)
@@ -189,24 +191,24 @@ func (mgr *CacheManager) WriteToCache(
 	return token, nil
 }
 
-func (mgr *CacheManager) SealFileAtCache(pFid string, token string, size int32) error {
+func (mgr *CacheManager) SealFileAtCache(fid string, token string, size int32) error {
 	err := mgr.dbOpsFile.CommitCacheFileInDB(
-		pFid, PendingToNormalFid(pFid), token, size)
+		fid, token, size)
 	if err != nil {
-		log.Printf("[ERROR] SealFileAtCache: Seal file(%s) failed.", pFid)
+		log.Printf("[ERROR] SealFileAtCache: Seal file(%s) failed.", fid)
 		return err
 	}
 	return nil
 }
 
 // rollback file meta in db, if write cache failed
-func (mgr *CacheManager) RollbackFileInDB(pFid string) error {
-	err := mgr.dbOpsFile.DeletePendingFileWithFIdInDB(pFid)
+func (mgr *CacheManager) RollbackFileInDB(fid string) error {
+	err := mgr.dbOpsFile.DeletePendingFileWithFIdInDB(fid)
 	if err != nil {
-		log.Printf("[ERROR] RollbackFileInDB: rollback file(%s) failed.", pFid)
+		log.Printf("[ERROR] RollbackFileInDB: rollback file(%s) failed.", fid)
 		return err
 	}
-	log.Printf("rollback with pFid: %s", pFid)
+	log.Printf("rollback with fid: %s", fid)
 	return nil
 }
 

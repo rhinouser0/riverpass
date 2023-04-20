@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	dbops "holder/src/db_ops"
-	"log"
 	"math/rand"
 	"os"
 	"regexp"
@@ -21,6 +20,8 @@ import (
 
 	"github.com/common/definition"
 	"github.com/common/util"
+	. "github.com/common/zaplog"
+	"go.uber.org/zap"
 )
 
 // A triplet is a combination of 3 harnessed blob operation headers.
@@ -90,17 +91,17 @@ func (pbh *PhyBH) New(shardId int, fdb *dbops.DBOpsFile) {
 	// load from FS the triplets, check and hydrate the PhyBH.
 	var triIds []string
 	var totalSize int64
-	log.Println("[PhyBH.NEW] ScanDB")
+	ZapLogger.Info("ScanLocalFS")
 	var triIdsInDisk []string
 	triIdsInDisk, totalSize = ScanLocalFS(shardId)
 
 	pbh.FDb = fdb
 
-	log.Printf("[PhyBH.NEW] PhyBH: DELETE PENDING FILES IN DB")
+	ZapLogger.Info("DELETE PENDING FILES IN DB")
 	pbh.FDb.DeleteAllPendingFileInDB()
 	triIds, err := pbh.FDb.ListTripleIdOfAllFiles()
 	if err != nil {
-		log.Fatalln(err)
+		ZapLogger.Fatal("ListTripleIdOfAllFiles", zap.Any("err", err))
 	}
 	setDB := make(map[string]struct{})
 	for _, v := range triIds {
@@ -109,18 +110,21 @@ func (pbh *PhyBH) New(shardId int, fdb *dbops.DBOpsFile) {
 	orphanSize := int64(0)
 	for _, v := range triIdsInDisk {
 		if _, ok := setDB[v]; !ok {
-			log.Printf("[PhyBH.NEW] PhyBH: DELETE ORPHAN FILE ON DISK, tripleid: %s\n", v)
+			ZapLogger.Info("DELETE ORPHAN FILE ON DISK", zap.Any("tripId", v))
 			orphanSize += DeleteTripletFilesOnDisk(v)
 		}
 	}
-	log.Printf("[PhyBH.NEW] totalSize: %v,orphanSize: %v\n", totalSize, orphanSize)
+	ZapLogger.Info("PhyBH.New",
+		zap.Any("totalSize", totalSize),
+		zap.Any("orphanSize", orphanSize))
 	pbh.totalBytes = totalSize - orphanSize
 
 	if pbh.totalBytes < 0 {
-		log.Println("[PhyBH.NEW WARNING] PhyBH: totalBytes < 0 ", pbh.totalBytes)
+		ZapLogger.Warn("totalBytes < 0", zap.Any("totalBytes", pbh.totalBytes))
 		pbh.totalBytes = 0
 	}
-	log.Println("[PhyBH.NEW] PhyBH: Caculate totalBytes after deletion ", pbh.totalBytes)
+	ZapLogger.Info("Caculate totalBytes after deletion",
+		zap.Any("totalBytes", pbh.totalBytes))
 	cnt := 0
 	for _, triId := range triIds {
 		var triplet Triplet
@@ -134,7 +138,7 @@ func (pbh *PhyBH) New(shardId int, fdb *dbops.DBOpsFile) {
 		case K_state_base_ascii + K_index_header_closed:
 			pbh.ClosedTplt.Put(triId, &triplet)
 		case K_state_base_ascii + K_index_header_large:
-			log.Printf("[PhyBH.NEW] PhyBH: RECREAT LARGE FILE ON DISK, tripleid: %s\n", triId)
+			ZapLogger.Info("RECREAT LARGE FILE ON DISK", zap.Any("tripId", triId))
 			pbh.LargeObjTplt.Put(triId, &triplet)
 		default:
 			{
@@ -149,9 +153,10 @@ func (pbh *PhyBH) New(shardId int, fdb *dbops.DBOpsFile) {
 		pbh.totalBytes += tmpSize
 		pbh.OpenTplt.Put((*ptrTplt).Id, ptrTplt)
 	}
-	pbh.PrintTplts("Initialized")
+	// pbh.PrintTplts("Initialized")
 
-	log.Println("[PhyBH.NEW] PhyBH: Caculate totalBytes after initialization ", pbh.totalBytes)
+	ZapLogger.Info("Caculate totalBytes after initialization",
+		zap.Any("totalBytes", pbh.totalBytes))
 	// init goroutine for size checking and closing.
 	go pbh.LoopHotSwap()
 }
@@ -200,10 +205,10 @@ func (pbh *PhyBH) Put(blbId string, data []byte) (token string, err error) {
 		triplet, size = pbh.openNewTplt(true)
 		increaseBytes += size
 		pbh.LargeObjTplt.Put(triplet.Id, triplet)
-		log.Printf("[INFO] PhyBH: Large triplet has created, id: %s", triplet.Id)
+		ZapLogger.Info("Large triplet has created", zap.Any("id", triplet.Id))
 		token = definition.K_LARGE_OBJECT_PREFIX +
 			util.GenerateBlobToken(triplet.Id, blbId)
-		log.Printf("[INFO] PhyBH: Generated blob token: %s", token)
+		ZapLogger.Info("Generated blob token", zap.Any("token", token))
 	} else {
 		numOpenTplt := pbh.OpenTplt.size
 		randNum := rand.Intn(numOpenTplt)
@@ -218,9 +223,9 @@ func (pbh *PhyBH) Put(blbId string, data []byte) (token string, err error) {
 			i += 1
 			return true
 		})
-		log.Printf("[INFO] PhyBH: Open triplet picked, id: %s", pick)
+		ZapLogger.Info(" Open triplet picked", zap.Any("id", pick))
 		token = util.GenerateBlobToken(pick, blbId)
-		log.Printf("[INFO] PhyBH: Generated blob token: %s", token)
+		ZapLogger.Info("Generated blob token", zap.Any("token", token))
 		triplet = pbh.OpenTplt.Get(pick)
 	}
 	// TODO: Error handling for each step.
@@ -228,21 +233,22 @@ func (pbh *PhyBH) Put(blbId string, data []byte) (token string, err error) {
 	offset, size := triplet.BinHeader.Put(blbId, data)
 	if size != payloadSize {
 		atomic.AddInt64(&pbh.totalBytes, ^int64(maxAllocSize-1))
-		log.Printf("[ERROR] PhyBH: datalen %v is not equal to size %v\n", payloadSize, size)
+		ZapLogger.Error("BinHeader put error",
+			zap.Any("datalen", payloadSize), zap.Any("size", size))
 		return "", errors.New("BinHeader put error")
 	}
 	// step 2: Store the idx in memory; Flush must succeed
 	idxBytes, idxErr := triplet.IdxHeader.Put(blbId, offset, size)
 	if idxErr != nil {
 		atomic.AddInt64(&pbh.totalBytes, ^int64(maxAllocSize-1))
-		log.Println("[ERROR] PhyBH: idxErr: ", idxErr)
+		ZapLogger.Error("idx.Put", zap.Any("err", idxErr))
 		return "", idxErr
 	}
 	// step 3: Persist action in MF. Flush may or may not succeed
 	mfBytes, mfErr := triplet.MFHeader.Put(blbId)
 	if mfErr != nil {
 		atomic.AddInt64(&pbh.totalBytes, ^int64(maxAllocSize-1))
-		log.Println("[ERROR] PhyBH: mfERROR", mfErr)
+		ZapLogger.Error("mf.Put", zap.Any("err", mfErr))
 		return "", mfErr
 	}
 	increaseBytes += int64(payloadSize) + idxBytes + mfBytes
@@ -256,7 +262,7 @@ func (pbh *PhyBH) Put(blbId string, data []byte) (token string, err error) {
 func (pbh *PhyBH) Get(token string) (data []byte, err error) {
 	prefix := token[:len(definition.K_LARGE_OBJECT_PREFIX)]
 	if prefix == definition.K_LARGE_OBJECT_PREFIX {
-		log.Println("[INFO] PhyBH: Get Large triplet")
+		ZapLogger.Info("Get Large triplet")
 		tpltId := util.GetTripletIdFromToken(token[len(definition.K_LARGE_OBJECT_PREFIX):])
 		blbId := util.GetBlobIdFromToken(token[len(definition.K_LARGE_OBJECT_PREFIX):])
 		var hostTplt *Triplet
@@ -270,8 +276,8 @@ func (pbh *PhyBH) Get(token string) (data []byte, err error) {
 		if ptrIdx := hostTplt.IdxHeader.Get(blbId); ptrIdx != nil {
 			return hostTplt.BinHeader.Get(blbId, ptrIdx.Offset), nil
 		}
-		log.Printf("[INFO] PhyBH: Get failed, blob[%s] already deleted in tplt[%s]\n",
-			blbId, tpltId)
+		ZapLogger.Info("Get failed, blob already deleted in tplt",
+			zap.Any("blobId", blbId), zap.Any("tpltId", tpltId))
 
 	} else {
 		tpltId := util.GetTripletIdFromToken(token)
@@ -290,8 +296,8 @@ func (pbh *PhyBH) Get(token string) (data []byte, err error) {
 		if ptrIdx := hostTplt.IdxHeader.Get(blbId); ptrIdx != nil {
 			return hostTplt.BinHeader.Get(blbId, ptrIdx.Offset), nil
 		}
-		log.Printf("[INFO] PhyBH: Get failed, blob[%s] already deleted in tplt[%s]\n",
-			blbId, tpltId)
+		ZapLogger.Info("Get failed, blob already deleted in tplt",
+			zap.Any("blobId", blbId), zap.Any("tpltId", tpltId))
 	}
 	return data, nil
 }
@@ -301,11 +307,11 @@ func (pbh *PhyBH) openNewTplt(isLarge bool) (*Triplet, int64) {
 	var newTplt Triplet
 	size := newTplt.New(pbh.ShardId, uuid, isLarge)
 
-	log.Printf(
-		"[INFO] PhyBH: Shard(%d)-Openning new triplet for taking writes:"+
-			" id(%s), idx file(%s), mf file(%s), bin file(%s)\n",
-		pbh.ShardId, newTplt.Id, newTplt.IdxHeader.LocalName,
-		newTplt.MFHeader.LocalName, newTplt.BinHeader.LocalName)
+	ZapLogger.Info("Shard-Openning new triplet for taking writes",
+		zap.Any("shard", pbh.ShardId), zap.Any("id", newTplt.Id),
+		zap.Any("idx file", newTplt.IdxHeader.LocalName),
+		zap.Any("mf file", newTplt.MFHeader.LocalName),
+		zap.Any("bin file", newTplt.BinHeader.LocalName))
 	return &newTplt, size
 }
 
@@ -313,16 +319,14 @@ func (pbh *PhyBH) openNewTplt(isLarge bool) (*Triplet, int64) {
 func (pbh *PhyBH) PrintTplts(ctxStr string) {
 	dict := pbh.OpenTplt.dict
 	dict.Range(func(k, v interface{}) bool {
-		log.Printf(
-			"[INFO] PhyBH: %s Triplet[%s], state open, value: %v\n",
-			ctxStr, k.(string), v.(*Node).value)
+		ZapLogger.Info("PrintTplts", zap.Any("ctxStr", ctxStr),
+			zap.Any("triplet", k.(string)), zap.Any("value", v.(*Node).value))
 		return true
 	})
 	dict = pbh.ClosedTplt.dict
 	dict.Range(func(k, v interface{}) bool {
-		log.Printf(
-			"[INFO] PhyBH: %s Triplet[%s], state closed, value: %v\n",
-			ctxStr, k.(string), v.(*Node).value)
+		ZapLogger.Info("PrintTplts", zap.Any("ctxStr", ctxStr),
+			zap.Any("triplet", k.(string)), zap.Any("value", v.(*Node).value))
 		return true
 	})
 }
@@ -353,7 +357,7 @@ func (pbh *PhyBH) LoopHotSwap() {
 		for _, id := range idToClose {
 			// IdxHeader is the only one need to close, manifest may grow,
 			// binary follows IdxHeader's state.
-			log.Println("[LoopHotSwap] close Id", id)
+			ZapLogger.Info("close id", zap.Any("id", id))
 			pbh.ClosedTplt.Put(id, pbh.OpenTplt.Get(id))
 			pbh.OpenTplt.Get(id).IdxHeader.Close()
 			pbh.OpenTplt.DeleteFromCache(id)
@@ -383,9 +387,8 @@ func ScanLocalFS(shardId int) ([]string, int64) {
 	for _, file := range files {
 		triId := reIdxFile.FindStringSubmatch(file.Name())
 		if triId != nil {
-			log.Printf(
-				"Found triplet id(%s) by scanning idx file name in localFS.",
-				triId[1])
+			ZapLogger.Info("Found triplet id by scanning idx file name in localFS",
+				zap.Any("tripId", triId[1]))
 			triIds = append(triIds, triId[1])
 		}
 	}
@@ -404,7 +407,8 @@ func GetFileSize(path string) int64 {
 		return 0
 	}
 	if err != nil {
-		log.Fatalln("[ScanLocalFS] error ", err)
+		ZapLogger.Error("", zap.Any("err", err))
+		return 0
 	}
 	return file.Size()
 }
@@ -414,12 +418,12 @@ func RemoveFile(path string) int64 {
 	if ok, deleteSize, pathErr := PathExists(path); ok {
 		err := os.Remove(path)
 		if err != nil {
-			log.Fatalln("REMOVE ERROR", err)
+			ZapLogger.Error("remove file", zap.Any("err", err))
 		} else {
 			res += deleteSize
 		}
 	} else if pathErr != nil {
-		log.Fatalln("PATH ERROR", pathErr)
+		ZapLogger.Error("", zap.Any("path error", pathErr))
 	}
 	return res
 }
@@ -434,7 +438,7 @@ func DeleteTripletFilesOnDisk(tripleId string) int64 {
 	binName := fmt.Sprintf("%s/binary_%d_%s.dat", localfsPrefix, shardId, tripleId)
 	idxName := fmt.Sprintf("%s/idx_h_%d_%s.dat", localfsPrefix, shardId, tripleId)
 	mfName := fmt.Sprintf("%s/mf_h_%d_%s.dat", localfsPrefix, shardId, tripleId)
-	log.Println("remove files of tripId", tripleId)
+	ZapLogger.Info("remove files of tripId", zap.Any("tripId", tripleId))
 	res += RemoveFile(binName) + RemoveFile(idxName) + RemoveFile(mfName)
 	return res
 }

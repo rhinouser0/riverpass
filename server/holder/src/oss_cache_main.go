@@ -7,14 +7,11 @@ package main
 import (
 	"errors"
 	"flag"
-	"fmt"
 	blobs "holder/src/blob_handler"
-	"holder/src/cache_ops"
 	cache "holder/src/cache_ops"
 	_ "holder/src/db_ops"
 	db_ops "holder/src/db_ops"
 	files "holder/src/file_handler"
-	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -50,15 +47,15 @@ type OssHolderServer struct {
 }
 
 func argsfunc() {
-	log.Println("main input args 3:")
+	ZapLogger.Info("main input args 3:")
 	if len(os.Args) == 3 {
 		maxSize, err := strconv.Atoi(os.Args[2])
 		if err != nil {
-			log.Fatalln(err)
+			ZapLogger.Fatal("strconv.Atoi", zap.Any("err", err))
 		}
 		ratio := 0.95
 		definition.F_CACHE_MAX_SIZE = int64(definition.K_MiB) * int64(float64(maxSize)*ratio)
-		log.Println("Args F_CACHE_MAX_SIZE : ", definition.F_CACHE_MAX_SIZE)
+		ZapLogger.Info("Args", zap.Any("F_CACHE_MAX_SIZE", definition.F_CACHE_MAX_SIZE))
 	}
 }
 
@@ -66,18 +63,15 @@ func init() {
 	// Config initialization...
 	dir, err := os.Getwd()
 	if err != nil {
-		log.Fatalf("os.Getwd() error! \n")
+		ZapLogger.Fatal("os.Getwd()", zap.Any("err", err))
 	}
 	dirConfig := dir + "/../oss_server_config.xml"
-	log.Println("Directory of oss_server_config file:", dirConfig)
+	ZapLogger.Info("", zap.Any("Directory of oss_server_config", dirConfig))
 
 	var cfg config.OssConfig
 	cfg.LoadXMLConfig(dirConfig)
 	if err != nil {
-		log.Fatalln(err)
-	}
-	if err != nil {
-		log.Fatalln(err)
+		ZapLogger.Fatal("LoadXMLConfig", zap.Any("err", err))
 	}
 	Address = cfg.ParseOssHolderConfigAddress(ShardID)
 
@@ -103,10 +97,9 @@ func init() {
 
 	// Cache size initialization from cmd inputs...
 	argsfunc()
-	fmt.Println(" ")
-
-	log.Print("[init] End of main::init().\t Address:(", Address,
-		")\t DataPosition:(", definition.DataPosition, ").\n ")
+	ZapLogger.Info("End of main::init().",
+		zap.Any("Address", Address),
+		zap.Any("DataPosition", definition.DataPosition))
 }
 
 // register http path handlers
@@ -120,14 +113,14 @@ func HttpRead(w http.ResponseWriter, r *http.Request) {
 	var url string
 	values := r.URL.Query()
 	url = values.Get("url")
-	log.Printf("[HttpRead] url=%v\n", url)
+	ZapLogger.Info("HttpRead", zap.Any("url", url))
 	resp, err := http.Get(url)
 	if err != nil {
 		panic(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		log.Printf("url: %s is not available\n", url)
+		ZapLogger.Error("url is not available", zap.Any("url", url))
 		w.WriteHeader(404)
 		return
 	}
@@ -136,13 +129,15 @@ func HttpRead(w http.ResponseWriter, r *http.Request) {
 	//offset := 0,size := 0 means read all data from 0 to len(data).
 	data, err := OssServer.TryReadFromCache(url, 0, 0, etag)
 	if err != nil {
-		log.Fatalln(err)
+		ZapLogger.Error("TryReadFromCache", zap.Any("err", err))
+		w.WriteHeader(404)
+		return
 	}
 	if data == nil {
-		log.Printf("[HttpRead] file not found on disk, get from oss\n")
+		ZapLogger.Info("file not found on disk, get from oss")
 		w.WriteHeader(404)
 	} else {
-		log.Println("[HttpRead] READ SUCCESSFULLY!")
+		ZapLogger.Info("READ SUCCESSFULLY", zap.Any("url", url))
 		h := w.Header()
 		h.Set("Content-type", "application/octet-stream")
 		h.Set("Content-Disposition", "attachment;filename="+url)
@@ -164,13 +159,15 @@ func (s *OssHolderServer) TryReadFromCache(
 	s.mtx.Lock()
 	fm, state, err := s.ListFileAndState(fileName)
 	if err != nil {
-		log.Fatalln(err)
+		ZapLogger.Error("ListFileAndState", zap.Any("err", err))
+		return nil, err
 	}
 	if state == -1 {
 		// Didn't find the file in cache.
 		fid, err := s.CreateFileForCache(fileName, etag)
 		if err != nil {
-			log.Fatalln(err)
+			ZapLogger.Error("CreateFileForCache", zap.Any("err", err))
+			return nil, err
 		}
 		s.mgr.EnqueueWriteReq(fid, fileName)
 		s.mtx.Unlock()
@@ -179,25 +176,26 @@ func (s *OssHolderServer) TryReadFromCache(
 	s.mtx.Unlock()
 	if state == definition.F_BLOB_STATE_PENDING {
 		// cache is downloading
-		log.Printf("Didn't find the file in cache(cache is downloading), file name: %s", fileName)
+		ZapLogger.Info("Didn't find the file in cache(cache is downloading)",
+			zap.Any("file", fileName))
 		return nil, nil
 	} else if state == definition.F_BLOB_STATE_READY {
 		if fm == nil {
-			log.Printf("file meta is nil in db, file: %s", fileName)
+			ZapLogger.Error("file meta is nil in db", zap.Any("file", fileName))
 			return nil, errors.New("file meta is nil in db")
 		}
 		if etag != fm.Etag {
 			fm.Etag = etag
 			s.dbOpsFile.UpdateFilemetaAndStateInDB(fileName,
 				fm, definition.F_BLOB_STATE_PENDING)
-			log.Printf("Cache is outdate, redownload, file name: %s", fileName)
+			ZapLogger.Info("Cache is outdate, redownload", zap.Any("file", fileName))
 			s.mgr.EnqueueWriteReq(fileName, fileName)
 			return nil, nil
 		}
 		// Read the file from cache.
 		fid := fileName
 		if fm.RngCodeList == nil {
-			log.Println("[TryReadFromCache] fm.RngCodeList is nil")
+			ZapLogger.Info("fm.RngCodeList is nil")
 			return nil, nil
 		}
 		fr := files.FileReader{
@@ -207,7 +205,7 @@ func (s *OssHolderServer) TryReadFromCache(
 		var readBytes []byte
 		offset = fm.RngCodeList.Front().Value.(range_code.RangeCode).Start
 		size = fm.RngCodeList.Front().Value.(range_code.RangeCode).End
-		log.Printf("[TryReadFromCache] read from start=%v  end=%v\n", offset, size)
+		ZapLogger.Info("read from", zap.Any("start", offset), zap.Any("size", size))
 		if time.Now().Sub(listTs).Milliseconds() > definition.F_cache_purge_waiting_ms {
 			ZapLogger.Error("[TryReadFromCache] faild:",
 				zap.Any("fail to avoid stale cache data: ", fileName))
@@ -220,7 +218,9 @@ func (s *OssHolderServer) TryReadFromCache(
 		}
 		return readBytes, nil
 	}
-	log.Printf("[ERROR] TryReadFromCache, file name: %s, state: %d", fileName, state)
+	ZapLogger.Error("logical error, state is invalid",
+		zap.Any("file", fileName),
+		zap.Any("state", state))
 	return nil, errors.New("logical error, state is invalid.")
 }
 
@@ -251,9 +251,7 @@ func (s *OssHolderServer) CreateFileForCache(fileName string, etag string) (stri
 	}
 	err := s.dbOpsFile.CreateFileWithFidInDB(fileName, &fm)
 	if err != nil {
-		log.Printf(
-			"[ERROR][CreateFileWithFid]: CreateFileWithFid to DB failed: %v",
-			err)
+		ZapLogger.Error("CreateFileWithFid to DB failed", zap.Any("err", err))
 		return "", err
 	}
 	return fileName, nil
@@ -267,6 +265,6 @@ func main() {
 	RegisterHttpHandler()
 	err := http.ListenAndServe(Address, nil)
 	if err != nil {
-		fmt.Println("Listen to http requests failed", err)
+		ZapLogger.Error("Listen to http requests failed", zap.Any("err", err))
 	}
 }

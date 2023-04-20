@@ -7,7 +7,9 @@ package file_handler
 import (
 	blobs "holder/src/blob_handler"
 	dbops "holder/src/db_ops"
-	"log"
+
+	. "github.com/common/zaplog"
+	"go.uber.org/zap"
 
 	"github.com/common/util"
 )
@@ -30,35 +32,29 @@ func (fu *FileWriter) WriteAt(fid string, offset int32, size int32, data []byte)
 	err := fu.BlobSegDb.CreateBlobSegInDB(
 		[]int32{offset, offset + size}, fid, partialToken)
 	if err != nil {
-		log.Printf(
-			"[ERROR] writer: Create blob entry(%s) in DB failed for fid(%s)",
-			partialToken, fid)
+		ZapLogger.Error("Create blob entry in DB failed",
+			zap.Any("blob entry", partialToken),
+			zap.Any("fid", fid))
 		return err
 	}
 
 	// TODO: Implement blacklist gc.
 	fullToken, err := fu.Pbh.Put(blobId, data)
 	if err != nil {
-		log.Printf("[ERROR] writer: Put data(offset: %d) failed for fid(%s).", offset, fid)
+		ZapLogger.Error("Put data failed", zap.Any("offset", offset), zap.Any("fid", fid))
 		return err
-	} else {
-		log.Printf(
-			"[INFO] writer: Put data(offset: %d) succeeded for fid(%s), token: %s",
-			offset, fid, fullToken)
 	}
 
 	err = fu.BlobSegDb.CommitBlobInDB(
 		[]int32{offset, offset + size}, fid, fullToken)
 	if err != nil {
-		log.Printf(
-			"[ERROR] writer: Commit blob(token: %s) failed for file(%s).",
-			fullToken, fid)
+		ZapLogger.Error("Commit blob failed", zap.Any("token", fullToken), zap.Any("fid", fid))
 		return err
 	}
 
-	log.Printf(
-		"[INFO] writer: Successfully put blob(token: %s) to file(%s)",
-		fullToken, fid)
+	ZapLogger.Info("Put data succeeded", zap.Any("offset", offset),
+		zap.Any("fid", fid),
+		zap.Any("token", fullToken))
 	return nil
 }
 
@@ -69,17 +65,17 @@ func (fu *FileWriter) WriteFileToCache(fid string, data []byte) (string, error) 
 	// TODO: Implement blacklist gc.
 	fullToken, err := fu.Pbh.Put(blobId, data)
 	if err != nil {
-		log.Printf("[ERROR] writer: Put data failed for fid(%s), error: %s", fid, err)
+		ZapLogger.Error("Put data failed", zap.Any("fid", fid), zap.Any("err", err))
 		return "", err
 	}
-	log.Printf("[INFO] writer: Put data succeeded for fid(%s), token: %s", fid, fullToken)
+	ZapLogger.Info("Put data succeeded", zap.Any("fid", fid), zap.Any("token", fullToken))
 	return fullToken, nil
 }
 
 func (fu *FileWriter) Close(fid string) error {
 	err := fu.FileDb.CommitFileInDB(fid)
 	if err != nil {
-		log.Printf("[ERROR] writer: Seal file(%s) failed.", fid)
+		ZapLogger.Error("writer: Seal file failed", zap.Any("file", fid))
 		return err
 	}
 	return nil
@@ -87,9 +83,9 @@ func (fu *FileWriter) Close(fid string) error {
 
 func (fu *FileWriter) checkUploader() {
 	if fu.Pbh == nil {
-		log.Fatal("writer: FileWriter init not finished: Pbh")
+		ZapLogger.Fatal("FileWriter init not finished: Pbh")
 	}
 	if fu.FileDb == nil {
-		log.Fatal("writer: FileWriter init not finished: FileDb")
+		ZapLogger.Fatal("FileWriter init not finished: FileDb")
 	}
 }

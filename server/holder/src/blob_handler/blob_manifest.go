@@ -7,12 +7,13 @@ package blob_handler
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"strings"
 	"sync"
 
 	"github.com/common/definition"
+	. "github.com/common/zaplog"
+	"go.uber.org/zap"
 )
 
 // Note that a manifest file never close, since it has deletion operation
@@ -76,7 +77,7 @@ func (mfh *MFHeader) New(shardId int, triId string) int64 {
 	if os.IsNotExist(err) {
 		return mfh.create()
 	} else if err != nil {
-		log.Fatalln("[MFHeader] NEW error ", err)
+		ZapLogger.Fatal("MFHeader New", zap.Any("err", err))
 	}
 	mfh.load(info.Size())
 	return info.Size()
@@ -116,11 +117,11 @@ func (ih *MFHeader) load(size int64) {
 		blbId := ies[i].BlobId
 		if ies[i].Action == K_action_delete+K_action_base_ascii {
 			ih.deletionLog[blbId] = ies[i].Action
-			log.Printf("[INFO] Emplaced %v deletion log in-memory.\n", blbId)
+			ZapLogger.Info("Emplaced deletion log in-memory", zap.Any("blobId", blbId))
 		}
 	}
-	log.Printf("[INFO] Loaded manifest file %s, parsed entry num(%d).\n",
-		ih.LocalName, len(ies))
+	ZapLogger.Info("", zap.Any("manifest file", ih.LocalName),
+		zap.Any("entry num", len(ies)))
 	if len(ies) > 0 {
 		ih.Empty = false
 	}
@@ -128,8 +129,8 @@ func (ih *MFHeader) load(size int64) {
 
 // created with open state
 func (mfh *MFHeader) create() int64 {
-	log.Printf("[INFO] Manifest file(%s) doesn't exist, creating a new one.\n",
-		mfh.LocalName)
+	ZapLogger.Info("Manifest file doesn't exist, creating a new one",
+		zap.Any("file", mfh.LocalName))
 	f, err := os.Create(mfh.LocalName)
 	Check(err)
 
@@ -188,11 +189,11 @@ func (mfh *MFHeader) flush(entry *MFEntry) (int64, error) {
 	}
 	if !mfh.Empty {
 		if int64(res)-1 != K_mf_entry_len {
-			log.Fatalf("[MF FLUSH ERROR] : datalen %v is not equal to size %v\n", int64(res)-1, K_mf_entry_len)
+			ZapLogger.Fatal("mf flush", zap.Any("datalen", int64(res)-1), zap.Any("size", K_mf_entry_len))
 		}
 	} else {
 		if int64(res)-1 != K_mf_entry_len-2 {
-			log.Fatalf("[MF FLUSH ERROR] : datalen %v is not equal to size %v\n", int64(res)-1, K_mf_entry_len-2)
+			ZapLogger.Fatal("mf flush", zap.Any("datalen", int64(res)-1), zap.Any("size", K_mf_entry_len-2))
 		}
 	}
 	mfh.Empty = false

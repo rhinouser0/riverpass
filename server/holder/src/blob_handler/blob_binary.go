@@ -7,15 +7,15 @@ package blob_handler
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
 	"fmt"
-	"log"
 	"os"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/common/definition"
+	. "github.com/common/zaplog"
+	"go.uber.org/zap"
 )
 
 // the name must be captial
@@ -68,7 +68,7 @@ func (bh *BinHeader) New(shardId int, triId string) int64 {
 		bh.CurOff = 0
 		return 0
 	} else if err != nil {
-		log.Fatalln("[BinHeader] NEW error ", err)
+		ZapLogger.Fatal("os.Stat", zap.Any("file", bh.LocalName), zap.Any("err", err))
 	}
 	bh.CurOff = info.Size()
 	return info.Size()
@@ -85,8 +85,8 @@ func (bh *BinHeader) Put(blobId string, binary []byte) (int64, int64) {
 	}
 	offset, sizeWritten := bh.flush(&encoded)
 	bh.CurOff += sizeWritten
-	log.Printf("[INFO] Binary file: Put blob(%s) succeeded, offset(%d), sizeWritten(%d)",
-		blobId, offset, sizeWritten)
+	ZapLogger.Info("Put blob succeeded", zap.Any("blobId", blobId),
+		zap.Any("offset", offset), zap.Any("sizeWritten", sizeWritten))
 	return offset, sizeWritten
 }
 
@@ -99,21 +99,21 @@ func (bh *BinHeader) Get(blobId string, offset int64) (binary []byte) {
 	} else {
 		data = bh.readBlob(blobId, offset)
 	}
-	log.Printf("[INFO] Binary file: Get blob(%s) succeeded, offset(%d), size read(%d)",
-		blobId, offset, len(data))
+	ZapLogger.Info("Get blob succeeded", zap.Any("blobId", blobId),
+		zap.Any("offset", offset), zap.Any("size read", len(data)))
 	return data
 }
 
 func (bh *BinHeader) flush(binary *[]byte) (int64, int64) {
 	f, err := os.OpenFile(bh.LocalName, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0755)
 	if err != nil {
-		log.Fatal(err)
+		ZapLogger.Fatal("os.OpenFile", zap.Any("file", bh.LocalName), zap.Any("err", err))
 	}
 	defer f.Close()
 	// Persist
 	written := 0
 	if written, err = f.Write(*binary); err != nil {
-		log.Fatal(err)
+		ZapLogger.Fatal("f.Write", zap.Any("file", bh.LocalName), zap.Any("err", err))
 	}
 	return bh.CurOff, int64(written)
 }
@@ -121,31 +121,33 @@ func (bh *BinHeader) flush(binary *[]byte) (int64, int64) {
 func (bh *BinHeader) readBlob(blbId string, offset int64) (blobBody []byte) {
 	f, err := os.OpenFile(bh.LocalName, os.O_RDONLY, 0755)
 	if err != nil {
-		log.Fatal(err)
+		ZapLogger.Fatal("os.OpenFile", zap.Any("file", bh.LocalName), zap.Any("err", err))
 	}
 	defer f.Close()
 
 	idAndSize := make([]byte, 136)
 	if _, err = f.ReadAt(idAndSize, offset); err != nil {
-		log.Fatal(err)
+		ZapLogger.Fatal("f.readAt", zap.Any("file", bh.LocalName), zap.Any("err", err))
 	}
 
 	idOnDisk := DecodeName(idAndSize[:128])
 	if strings.Compare(blbId, idOnDisk) != 0 {
-		log.Printf("[ERROR] blbId[%s] vs idOnDisk[%s]", blbId, idOnDisk)
-		err := errors.New("blob name mismatch")
-		log.Fatal(err)
+		ZapLogger.Fatal("blob name mismatch",
+			zap.Any("blobId", blbId),
+			zap.Any("idOnDisk", idOnDisk))
 	}
 
 	cntSize := DecodeSize(idAndSize[128:136])
 	bodyBytes := make([]byte, cntSize)
 	start := time.Now()
 	if _, err = f.ReadAt(bodyBytes, offset+136); err != nil {
-		log.Fatal(err)
+		ZapLogger.Fatal("f.Read failed", zap.Any("err", err))
 	}
 	duration := time.Now().Sub(start)
-	log.Printf("read file from cache, file name: %s, data size: %d, duration: %f s\n",
-		bh.LocalName, cntSize, duration.Seconds())
+	ZapLogger.Info("read file from cache",
+		zap.Any("file", bh.LocalName),
+		zap.Any("size", cntSize),
+		zap.Any("duration seconds", duration.Seconds()))
 
 	return bodyBytes
 }
@@ -153,32 +155,31 @@ func (bh *BinHeader) readBlob(blbId string, offset int64) (blobBody []byte) {
 func (bh *BinHeader) readBlob4K(blbId string, offset int64) (blobBody []byte) {
 	f, err := os.OpenFile(bh.LocalName, os.O_RDONLY, 0755)
 	if err != nil {
-		log.Fatal(err)
+		ZapLogger.Fatal("os.OpenFile", zap.Any("file", bh.LocalName), zap.Any("err", err))
 	}
 	defer f.Close()
 	idSizeAndCheckSum := make([]byte, definition.F_BLOBID_SIZE+8+definition.F_CHECKSUM_SIZE)
 	if _, err = f.ReadAt(idSizeAndCheckSum, offset); err != nil {
-		log.Fatal(err)
+		ZapLogger.Fatal("f.ReadAt failed", zap.Any("err", err))
 	}
 	idOnDisk := DecodeName(idSizeAndCheckSum[:definition.F_BLOBID_SIZE])
 	if strings.Compare(blbId, idOnDisk) != 0 {
-		log.Printf("[ERROR] blbId[%s] vs idOnDisk[%s]", blbId, idOnDisk)
-		err := errors.New("blob name mismatch")
-		log.Fatal(err)
+		ZapLogger.Fatal("blob name mismatch",
+			zap.Any("blobId", blbId),
+			zap.Any("idOnDisk", idOnDisk))
 	}
 	dataSize := DecodeSize(idSizeAndCheckSum[definition.F_BLOBID_SIZE : definition.F_BLOBID_SIZE+8])
-	log.Printf("dataSize: %v\n", dataSize)
 	chunksNum := (dataSize + definition.F_CONTENT_SIZE - 1) / definition.F_CONTENT_SIZE
 	totalBytes := make([]byte, chunksNum*4*definition.K_KiB)
 	if _, err = f.ReadAt(totalBytes, offset); err != nil {
-		log.Fatal(err)
+		ZapLogger.Fatal("f.ReadAt failed", zap.Any("err", err))
 	}
 	blobId, bodyBytes := Decode4K(totalBytes)
-	//TODO Use error return instead, rather than directly crashing the server
+	//TODO: Use error return instead, rather than directly crashing the server
 	if strings.Compare(blobId, idOnDisk) != 0 {
-		log.Printf("[ERROR] blbId[%s] vs idOnDisk[%s]", blobId, idOnDisk)
-		err := errors.New("blob name mismatch")
-		log.Fatal(err)
+		ZapLogger.Fatal("blob name mismatch",
+			zap.Any("blobId", blobId),
+			zap.Any("idOnDisk", idOnDisk))
 	}
 	return bodyBytes
 }
@@ -269,7 +270,7 @@ func Decode4K(encoded []byte) (blobId string, data []byte) {
 		tmp := Chunk{}
 		err := binary.Read(buf, binary.LittleEndian, &tmp)
 		if err != nil {
-			log.Fatal(err)
+			ZapLogger.Fatal("binary.Read failed", zap.Any("err", err))
 		}
 		chunks = append(chunks, tmp)
 	}
@@ -288,7 +289,7 @@ func DecodeName(encoded []byte) (blobId string) {
 	buf := bytes.NewReader(encoded)
 	err := binary.Read(buf, binary.LittleEndian, &decoded)
 	if err != nil {
-		log.Fatal(err)
+		ZapLogger.Fatal("binary.Read failed", zap.Any("err", err))
 	}
 	// TODO: A bit dirty. refactor the hardcoded 8 number
 	return string(decoded[:8])
@@ -299,7 +300,7 @@ func DecodeSize(encoded []byte) int64 {
 	buf := bytes.NewReader(encoded)
 	err := binary.Read(buf, binary.LittleEndian, &size)
 	if err != nil {
-		log.Fatal(err)
+		ZapLogger.Fatal("binary.Read failed", zap.Any("err", err))
 	}
 	return size
 }

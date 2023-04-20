@@ -6,9 +6,9 @@ package file_handler
 
 import (
 	"container/list"
+	"errors"
 	blobs "holder/src/blob_handler"
 	dbops "holder/src/db_ops"
-	"log"
 	"math"
 	"sync"
 
@@ -77,14 +77,17 @@ func (fr *FileReader) ReadFromCache(
 	token := rngCodeList.Front().Value.(range_code.RangeCode).Token
 	allBytes := make([]byte, size)
 	if end < offset || start > offset || offset+size > end {
-		log.Println("WARNING!!!  index out of range!")
+		ZapLogger.Warn("index out of range", zap.Any("fid", fid),
+			zap.Any("start", start), zap.Any("end", end),
+			zap.Any("offset", offset), zap.Any("size", size))
 	}
 	var curBlobData []byte
 	curStart := int32(math.Max(float64(start), float64(offset)))
 	curEnd := int32(math.Min(float64(end), float64(offset+size)))
 	curBlobData, err = fr.readPiece(token, curStart-start, curEnd-start)
 	if err != nil {
-		log.Fatal(err)
+		ZapLogger.Error("readPiece", zap.Any("token", token), zap.Any("err", err))
+		return nil, err
 	} else {
 		copy(allBytes[(curStart-offset):(curEnd-offset)], curBlobData)
 	}
@@ -96,6 +99,13 @@ func (fr *FileReader) readPiece(
 	data, err := fr.Pbh.Get(token)
 	if err != nil {
 		return nil, err
+	}
+	dataLen := len(data)
+	if start >= int32(dataLen) || end >= int32(dataLen) {
+		ZapLogger.Error("index out of range", zap.Any("token", token),
+			zap.Any("start", start), zap.Any("end", end),
+			zap.Any("dataLen", dataLen))
+		return nil, errors.New("index out of range")
 	}
 	return data[start:end], nil
 }

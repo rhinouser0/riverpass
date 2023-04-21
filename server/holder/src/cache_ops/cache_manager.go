@@ -156,29 +156,28 @@ func (mgr *CacheManager) dowloadAndWriteCache(
 		return
 	}
 	// 2. Write To Cache
-	token, err := mgr.WriteToCache(fileName, definition.F_DB_STATE_READY, ossData)
+	token, err := mgr.WriteToCache(fileName, ossData)
 
 	if err != nil {
+		mgr.RollbackFileInDB(fid)
 		if strings.Contains(err.Error(), "cache full") {
 			mgr.EnqueueDeletionReq()
-			// TODO: rollback in background
-			// mgr.RollbackFileInDB(pendingFid)
 			return
 		} else {
-			// TODO: handle error
-			ZapLogger.Fatal("WriteToCache failed", zap.Any("err", err))
+			ZapLogger.Error("WriteToCache failed", zap.Any("err", err))
+			return
 		}
 	}
 	err = mgr.SealFileAtCache(fid, token, int32(len(ossData)))
 	// TODO: if the error is conflict, return
 	if err != nil {
 		// TODO: handle error
-		ZapLogger.Fatal("SealFileAtCache failed", zap.Any("err", err))
+		ZapLogger.Error("SealFileAtCache failed", zap.Any("err", err))
 	}
 }
 
 func (mgr *CacheManager) WriteToCache(
-	fid string, state int32, ossData []byte) (string, error) {
+	fid string, ossData []byte) (string, error) {
 	fw := file_handler.FileWriter{
 		Pbh:    mgr.pbh,
 		FileDb: mgr.dbOpsFile,

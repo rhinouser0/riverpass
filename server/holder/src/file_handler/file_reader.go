@@ -101,7 +101,7 @@ func (fr *FileReader) readPiece(
 		return nil, err
 	}
 	dataLen := len(data)
-	if start >= int32(dataLen) || end >= int32(dataLen) {
+	if start >= int32(dataLen) || end > int32(dataLen) {
 		ZapLogger.Error("index out of range", zap.Any("token", token),
 			zap.Any("start", start), zap.Any("end", end),
 			zap.Any("dataLen", dataLen))

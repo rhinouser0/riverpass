@@ -5,6 +5,7 @@
 package file_handler
 
 import (
+	"errors"
 	blobs "holder/src/blob_handler"
 	dbops "holder/src/db_ops"
 
@@ -23,7 +24,9 @@ type FileWriter struct {
 
 // Positional Write. Temporarily deprecated in this code base.
 func (fu *FileWriter) WriteAt(fid string, offset int32, size int32, data []byte) error {
-	fu.checkUploader()
+	if err := fu.checkUploader(); err != nil {
+		return err
+	}
 
 	blobId := util.ShordGuidGenerator()
 	// Partial Token is the full token without triplet id.
@@ -59,7 +62,9 @@ func (fu *FileWriter) WriteAt(fid string, offset int32, size int32, data []byte)
 }
 
 func (fu *FileWriter) WriteFileToCache(fid string, data []byte) (string, error) {
-	fu.checkUploader()
+	if err := fu.checkUploader(); err != nil {
+		return "", err
+	}
 
 	blobId := util.ShordGuidGenerator()
 	// TODO: Implement blacklist gc.
@@ -81,11 +86,14 @@ func (fu *FileWriter) Close(fid string) error {
 	return nil
 }
 
-func (fu *FileWriter) checkUploader() {
+func (fu *FileWriter) checkUploader() error {
 	if fu.Pbh == nil {
-		ZapLogger.Fatal("FileWriter init not finished: Pbh")
+		ZapLogger.Error("FileWriter init not finished: Pbh")
+		return errors.New("FileWriter init not finished")
 	}
 	if fu.FileDb == nil {
-		ZapLogger.Fatal("FileWriter init not finished: FileDb")
+		ZapLogger.Error("FileWriter init not finished: FileDb")
+		return errors.New("FileWriter init not finished")
 	}
+	return nil
 }

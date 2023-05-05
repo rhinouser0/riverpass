@@ -141,6 +141,7 @@ func HttpRead(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("Content-type", "application/octet-stream")
 		h.Set("Content-Disposition", "attachment;filename="+url)
+		h.Set("Content-Length", strconv.Itoa(len(data)))
 		w.WriteHeader(200)
 		w.Write(data)
 	}

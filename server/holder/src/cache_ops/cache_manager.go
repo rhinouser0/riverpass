@@ -7,8 +7,9 @@ package cache_ops
 import (
 	"bytes"
 	"io"
-	"log"
+	"io/ioutil"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -27,7 +28,9 @@ import (
 // 2. Need optimize the OSS download
 // 3. Need improving the cache eviction algorithm
 type CacheManager struct {
-	wMtx         sync.Mutex
+	wMtx sync.Mutex
+	// fileName->fid
+	// TODO: currently fid is fileName, so we can refactor writeItemMap.
 	writeItemMap map[string]string
 	wQueue       []string
 
@@ -53,14 +56,14 @@ func (mgr *CacheManager) New(fdb *db_ops.DBOpsFile, bh *blob.PhyBH) {
 }
 
 func (mgr *CacheManager) EnqueueWriteReq(
-	pendingFid string, fileName string) {
+	fid string, fileName string) {
 	mgr.wMtx.Lock()
 	defer mgr.wMtx.Unlock()
 	_, exist := mgr.writeItemMap[fileName]
 	if exist {
 		return
 	}
-	mgr.writeItemMap[fileName] = pendingFid
+	mgr.writeItemMap[fileName] = fid
 	mgr.wQueue = append(mgr.wQueue, fileName)
 }
 
@@ -94,9 +97,9 @@ func (mgr *CacheManager) loopBatchWrite() {
 		var namesAtHand = mgr.wQueue[:numToFetch]
 		mgr.wQueue = mgr.wQueue[numToFetch:]
 
-		var pendingFids []string
+		var fids []string
 		for _, name := range namesAtHand {
-			pendingFids = append(pendingFids, mgr.writeItemMap[name])
+			fids = append(fids, mgr.writeItemMap[name])
 			delete(mgr.writeItemMap, name)
 		}
 		mgr.wMtx.Unlock()
@@ -105,10 +108,10 @@ func (mgr *CacheManager) loopBatchWrite() {
 		wg := &sync.WaitGroup{}
 		for i, fileName := range namesAtHand {
 			wg.Add(1)
-			go func(filename string, pendingFid string) {
-				mgr.dowloadAndWriteCache(filename, pendingFid)
+			go func(filename string, fid string) {
+				mgr.dowloadAndWriteCache(filename, fid)
 				wg.Done()
-			}(fileName, pendingFids[i])
+			}(fileName, fids[i])
 		}
 		wg.Wait()
 	}
@@ -141,7 +144,7 @@ func (mgr *CacheManager) loopGarbageCollection() {
 }
 
 func (mgr *CacheManager) dowloadAndWriteCache(
-	fileName string, pendingFid string) {
+	fileName string, fid string) {
 	exist, ossDataLen := CheckUrl(fileName)
 	if !exist {
 		return
@@ -153,26 +156,28 @@ func (mgr *CacheManager) dowloadAndWriteCache(
 		return
 	}
 	// 2. Write To Cache
-	token, err := mgr.WriteToCache(fileName, definition.F_DB_STATE_READY, ossData)
+	token, err := mgr.WriteToCache(fileName, ossData)
 
 	if err != nil {
+		mgr.RollbackFileInDB(fid)
 		if strings.Contains(err.Error(), "cache full") {
 			mgr.EnqueueDeletionReq()
 			return
 		} else {
-			log.Fatalln(err)
+			ZapLogger.Error("WriteToCache failed", zap.Any("err", err))
+			return
 		}
 	}
-	log.Println("[dowloadAndWriteCache] token:", token)
-	err = mgr.SealFileAtCache(pendingFid, token, int32(len(ossData)))
+	err = mgr.SealFileAtCache(fid, token, int32(len(ossData)))
 	// TODO: if the error is conflict, return
 	if err != nil {
-		log.Fatalln(err)
+		// TODO: handle error
+		ZapLogger.Error("SealFileAtCache failed", zap.Any("err", err))
 	}
 }
 
 func (mgr *CacheManager) WriteToCache(
-	fid string, state int32, ossData []byte) (string, error) {
+	fid string, ossData []byte) (string, error) {
 	fw := file_handler.FileWriter{
 		Pbh:    mgr.pbh,
 		FileDb: mgr.dbOpsFile,
@@ -185,66 +190,112 @@ func (mgr *CacheManager) WriteToCache(
 	return token, nil
 }
 
-func (mgr *CacheManager) SealFileAtCache(pFid string, token string, size int32) error {
+func (mgr *CacheManager) SealFileAtCache(fid string, token string, size int32) error {
 	err := mgr.dbOpsFile.CommitCacheFileInDB(
-		pFid, PendingToNormalFid(pFid), token, size)
+		fid, token, size)
 	if err != nil {
-		log.Printf("[ERROR] SealFileAtCache: Seal file(%s) failed.", pFid)
+		ZapLogger.Error("Seal file failed", zap.Any("fid", fid))
 		return err
 	}
 	return nil
 }
 
-// Utility function
-func CheckUrl(arg string) (bool, int64) {
-	//check url
-	resp, err := http.Head(arg)
+// rollback file meta in db, if write cache failed
+func (mgr *CacheManager) RollbackFileInDB(fid string) error {
+	err := mgr.dbOpsFile.DeletePendingFileWithFIdInDB(fid)
 	if err != nil {
-		// maybe timeout , cannot crash the server.
-		log.Println("[CheckUrl] error: ", err)
-		return false, 0
+		ZapLogger.Error("rollback file failed", zap.Any("fid", fid))
+		return err
 	}
-	log.Printf("[CheckUrl] check url =%v finish \n", arg)
-	if resp.StatusCode == 404 {
-		log.Printf("[CheckUrl] url: %s is not exist\n", arg)
+	ZapLogger.Info("sucessfully rollback", zap.Any("fid", fid))
+	return nil
+}
+
+// Utility function
+func CheckUrl(url string) (bool, int64) {
+	//check url
+	if definition.F_local_mode {
+		stat, err := os.Stat(url)
+		if err == nil {
+			return true, stat.Size()
+		}
+		if os.IsNotExist(err) {
+			ZapLogger.Info("local file not found", zap.Any("file", url))
+			return false, 0
+		}
+		ZapLogger.Error("CheckUrl failed", zap.Any("err", err))
+		return false, 0
+
+	} else {
+		// TODO: http.Head with presign url maybe failed
+		resp, err := http.Head(url)
+		if err != nil {
+			// maybe timeout , cannot crash the server.
+			ZapLogger.Error("http.Head", zap.Any("err", err))
+			return false, 0
+		}
+		if resp.StatusCode == 404 {
+			ZapLogger.Error("url is not exist", zap.Any("url", url))
+			resp.Body.Close()
+			return false, 0
+		}
+		contentlength := resp.ContentLength
+		ZapLogger.Info("CheckUrl", zap.Any("url", url), zap.Any("size", contentlength))
+		if contentlength >= definition.F_CACHE_MAX_SIZE {
+			ZapLogger.Warn("url is too large", zap.Any("url", url),
+				zap.Any("cache size MB", definition.F_CACHE_MAX_SIZE/1024/1024))
+			resp.Body.Close()
+			return false, 0
+		}
 		resp.Body.Close()
-		return false, 0
+		return true, contentlength
 	}
-	contentlength := resp.ContentLength
-	log.Printf("[CheckUrl] url: %s size: %v\n", arg, contentlength)
-	if contentlength >= definition.F_CACHE_MAX_SIZE {
-		log.Printf("[CheckUrl] url: %s is larger than 100G\n", arg)
-		resp.Body.Close()
-		return false, 0
-	}
-	resp.Body.Close()
-	return true, contentlength
 }
 
 // Utility function
 func (mgr *CacheManager) DownLoad(url string, ossDataLen int64) []byte {
 	// Get the data
-	resp, err := http.Get(url)
-	if err != nil {
-		panic(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == 404 {
-		log.Println("[DownLoad] ossData not found")
-		return nil
-	}
-	var buf bytes.Buffer
-	_, err = io.Copy(&buf, resp.Body)
-	ossData := buf.Bytes()
-	if err != nil {
-		log.Println("[DownLoad] error: ", err)
-		if len(ossData) != int(ossDataLen) {
-			log.Println("[DownLoad] error: datalen %v is not equal to size %v\n", len(ossData), int(ossDataLen))
+	if definition.F_local_mode { // only for test
+		data, err := ioutil.ReadFile(url)
+		if err != nil {
+			ZapLogger.Error("read local file failed", zap.Any("err", err))
 			return nil
 		}
+		if len(data) != int(ossDataLen) {
+			ZapLogger.Error("datalen is not equal to size",
+				zap.Any("dataLen", len(data)), zap.Any("size", ossDataLen))
+			return nil
+		}
+		return data
+
+	} else {
+		start := time.Now()
+		resp, err := http.Get(url)
+		if err != nil {
+			panic(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode == 404 {
+			ZapLogger.Error("ossData not found", zap.Any("url", url))
+			return nil
+		}
+		var buf bytes.Buffer
+		_, err = io.Copy(&buf, resp.Body)
+		ossData := buf.Bytes()
+		if err != nil {
+			ZapLogger.Error("DownLoad failed", zap.Any("err", err))
+			if len(ossData) != int(ossDataLen) {
+				ZapLogger.Error("Download dataSize is not equal to inputdataLen",
+					zap.Any("download dataSize", len(ossData)), zap.Any("inputdataLen", ossDataLen))
+				return nil
+			}
+		}
+		duration := time.Now().Sub(start)
+		ZapLogger.Info("Download finish",
+			zap.Any("download dataSize", len(ossData)),
+			zap.Any("duration seconds", duration.Seconds()))
+		return ossData
 	}
-	log.Printf("[DownLoad] ossData len %v\n", len(ossData))
-	return ossData
 }
 
 // Utility function

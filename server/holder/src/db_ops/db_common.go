@@ -6,7 +6,6 @@ package db_ops
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"strconv"
 
@@ -38,14 +37,18 @@ var driverName string
 var dataSourceName string
 
 func argsfunc() {
-	log.Println("main input:")
-	for idx, args := range os.Args {
-		log.Println("    param", strconv.Itoa(idx), ":", args)
+	zaplog.ZapLogger.Info("main input")
+	for idx, arg := range os.Args {
+		zaplog.ZapLogger.Info("param", zap.Any("idx", idx), zap.Any("arg", arg))
 	}
-	var err error
-	ShardID, err = strconv.Atoi(os.Args[1])
-	if err != nil {
-		log.Fatalln(err)
+	if len(os.Args) >= 2 {
+		var err error
+		ShardID, err = strconv.Atoi(os.Args[1])
+		if err != nil {
+			zaplog.ZapLogger.Fatal("read shardID from input failed", zap.Any("err", err))
+		}
+	} else {
+		ShardID = 0
 	}
 }
 
@@ -53,11 +56,11 @@ func init() {
 	argsfunc()
 	dir, err := os.Getwd()
 	if err != nil {
-		log.Fatalf("os.Getwd() error! \n")
+		zaplog.ZapLogger.Fatal("os.Getwd()", zap.Any("err", err))
 	}
 	var dirDBConfig string
 	dirDBConfig = dir + "/../oss_db_config.xml"
-	log.Println("Directory of oss_db_config file:", dirDBConfig)
+	zaplog.ZapLogger.Info("", zap.Any("Directory of oss_db_config file", dirDBConfig))
 
 	alldbConfigInfo = config.ParseDBConfig(dirDBConfig)
 	dbConfigInfo0 = &alldbConfigInfo.DbBases[ShardID]
@@ -68,7 +71,7 @@ func init() {
 	dbIndex := dbConfigInfo0.DbBaseIndex
 	dbConfigInfo = &dbConfigInfo0.Table_name
 	if alldbConfigInfo == nil || dbConfigInfo0 == nil || dbConfigInfo == nil {
-		log.Fatalf("null pointer error! \n")
+		zaplog.ZapLogger.Fatal("init failed, null pointer.")
 	}
 	zaplog.ZapLogger.Debug("****************************")
 	zaplog.ZapLogger.Debug("", zap.Any("driverName", driverName))

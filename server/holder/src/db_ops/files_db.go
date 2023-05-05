@@ -11,9 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"math/rand"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -123,6 +121,8 @@ type DBFileMeta struct {
 	BlobId string
 
 	RngList string
+
+	Etag string
 }
 
 func DBFileMeta2FileMeta(dbfm *DBFileMeta) definition.FileMeta {
@@ -140,6 +140,7 @@ func DBFileMeta2FileMeta(dbfm *DBFileMeta) definition.FileMeta {
 		OwnerList:   ownerll,
 		BlobId:      dbfm.BlobId,
 		RngCodeList: rngll,
+		Etag:        dbfm.Etag,
 	}
 
 	if dbfm.RngList == "" {
@@ -178,6 +179,7 @@ func FileMeta2DBFileMeta(fm *definition.FileMeta) DBFileMeta {
 		// TODO: add the blob related code.
 		BlobId:  fm.BlobId,
 		RngList: "",
+		Etag:    fm.Etag,
 	}
 
 	if fm.RngCodeList == nil {
@@ -212,8 +214,8 @@ func (opsFile *DBOpsFile) ListFileFromDB(fileId string, state int32) (*definitio
 	opsFile.ReleaseConn()
 
 	if qErr != nil {
-		log.Printf("[ERROR][ListFileFromDB] Query file_meta from DB by fid(%s) + state(%d) failed: %v",
-			fileId, state, qErr)
+		ZapLogger.Error("Query file_meta from DB failed",
+			zap.Any("fid", fileId), zap.Any("state", state), zap.Any("err", qErr))
 		return nil, qErr
 	}
 	defer rows.Close()
@@ -221,11 +223,13 @@ func (opsFile *DBOpsFile) ListFileFromDB(fileId string, state int32) (*definitio
 	var encoded []byte
 	if rows.Next() {
 		if err := rows.Scan(&encoded); err != nil {
-			log.Fatal(err)
+			ZapLogger.Error("rows.Scan failed", zap.Any("err", err))
+			return nil, err
 		}
 	}
 	if err := rows.Err(); err != nil {
-		log.Fatal(err)
+		ZapLogger.Error("rows.Err", zap.Any("err", err))
+		return nil, err
 	}
 
 	if len(encoded) == 0 {
@@ -236,9 +240,8 @@ func (opsFile *DBOpsFile) ListFileFromDB(fileId string, state int32) (*definitio
 	var dbfm DBFileMeta
 	jsErr := json.Unmarshal(encoded, &dbfm)
 	if jsErr != nil {
-		log.Printf(
-			"ERROR:[ListFileFromDB] Convert db string(%s) to dbfm failed: %v",
-			encoded, jsErr)
+		ZapLogger.Error("Convert db string to dbfm failed",
+			zap.Any("encoded", encoded), zap.Any("err", jsErr))
 		return nil, jsErr
 	}
 
@@ -247,20 +250,66 @@ func (opsFile *DBOpsFile) ListFileFromDB(fileId string, state int32) (*definitio
 	return &fm, nil
 }
 
+func (opsFile *DBOpsFile) ListFileAndStateFromDB(fileId string) (*definition.FileMeta, int, error) {
+	// Prepare ctx for executing query.
+	var ctx context.Context
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+
+	rows, qErr := opsFile.GetConnWithRetry().QueryContext(ctx,
+		"SELECT file_meta, state FROM "+dbConfigInfo.FileTableName+" WHERE fid = ?;",
+		fileId)
+	opsFile.ReleaseConn()
+
+	if qErr != nil {
+		ZapLogger.Error("Query file_meta from DB failed", zap.Any("fid", fileId), zap.Any("err", qErr))
+		return nil, -1, qErr
+	}
+	defer rows.Close()
+
+	var encoded []byte
+	var state int
+	if rows.Next() {
+		if err := rows.Scan(&encoded, &state); err != nil {
+			ZapLogger.Error("rows.Scan failed", zap.Any("err", err))
+			return nil, -1, err
+		}
+	}
+	if err := rows.Err(); err != nil {
+		ZapLogger.Error("rows.Err", zap.Any("err", err))
+		return nil, -1, err
+	}
+
+	if len(encoded) == 0 {
+		return nil, -1, nil
+	}
+
+	var fm definition.FileMeta
+	var dbfm DBFileMeta
+	jsErr := json.Unmarshal(encoded, &dbfm)
+	if jsErr != nil {
+		ZapLogger.Error("Convert db string to dbfm failed",
+			zap.Any("encoded", encoded), zap.Any("err", jsErr))
+		return nil, -1, jsErr
+	}
+
+	//DBres handle
+	fm = DBFileMeta2FileMeta(&dbfm)
+	return &fm, state, nil
+}
+
 func (opsFile *DBOpsFile) CreateFileWithFidInDB(fileId string, fileMeta *definition.FileMeta) error {
 	// Prepare ctx for executing query.
 	var ctx context.Context
 	ctx, stop := context.WithCancel(context.Background())
 	defer stop()
 
-	log.Println("[DEBUG] fileId:{", fileId, "} fileMeta:{", fileMeta, "} owners:{", fileMeta.OwnerList, "}")
 	dbfm := FileMeta2DBFileMeta(fileMeta)
-	log.Println("[DEBUG] fileId:{", fileId, "} fileMeta:{", dbfm, "} owners:", dbfm.OwnerList, "}")
 
 	var encoded []byte
 	encoded, jsErr := json.Marshal(&dbfm)
 	if jsErr != nil {
-		log.Printf("[ERROR][CreateFileWithFidInDB] Convert file_meta(%v) to json string failed: %v", dbfm, jsErr)
+		ZapLogger.Error("Convert file_meta to json string failed", zap.Any("dbfm", dbfm), zap.Any("err", jsErr))
 		return jsErr
 	}
 	rows, qErr := opsFile.GetConnWithRetry().QueryContext(ctx,
@@ -269,7 +318,7 @@ func (opsFile *DBOpsFile) CreateFileWithFidInDB(fileId string, fileMeta *definit
 	opsFile.ReleaseConn()
 
 	if qErr != nil {
-		log.Printf("[ERROR][CreateFileWithFidInDB] Insert file_meta(%v) to DB failed: %v", dbfm, qErr)
+		ZapLogger.Error("Insert file_meta to DB failed", zap.Any("dbfm", dbfm), zap.Any("err", qErr))
 		return qErr
 	}
 	defer rows.Close()
@@ -289,8 +338,8 @@ func (opsFile *DBOpsFile) ListFileAndOwnersFromDB(fileId string) (*definition.Fi
 	opsFile.ReleaseConn()
 
 	if qErr != nil {
-		log.Printf("[ERROR][ListFileAndOwnersFromDB] Query file_meta, owners from DB by fide(%s) failed: %v",
-			fileId, qErr)
+		ZapLogger.Error("Query file_meta, owners from DB failed",
+			zap.Any("fid", fileId), zap.Any("err", qErr))
 		return nil, "", qErr
 	}
 	defer rows.Close()
@@ -299,18 +348,22 @@ func (opsFile *DBOpsFile) ListFileAndOwnersFromDB(fileId string) (*definition.Fi
 	var owners string
 	if rows.Next() {
 		if err := rows.Scan(&encoded, &owners); err != nil {
-			log.Fatal(err)
+			ZapLogger.Error("rows.Scan failed", zap.Any("err", err))
+			return nil, "", err
 		}
 	}
 	if err := rows.Err(); err != nil {
-		log.Fatal(err)
+		ZapLogger.Error("rows.Err", zap.Any("err", err))
+		return nil, "", err
 	}
 
 	var fm definition.FileMeta
 	var dbfm DBFileMeta
 	jsErr := json.Unmarshal(encoded, &dbfm)
 	if jsErr != nil {
-		log.Printf("[ERROR][ListFileAndOwnersFromDB] Convert file_meta(%v) to json string failed: %v", dbfm, jsErr)
+		ZapLogger.Error("Convert file_meta to json string failed",
+			zap.Any("dbfm", dbfm),
+			zap.Any("err", jsErr))
 		return nil, "", jsErr
 	}
 
@@ -329,7 +382,7 @@ func (opsFile *DBOpsFile) UpdateFilemetaAndOwnerInDB(fileId string, dbfm *DBFile
 	var encoded []byte
 	encoded, jsErr := json.Marshal(&dbfm)
 	if jsErr != nil {
-		log.Printf("[ERROR][UpdateFilemetaAndOwnerInDB] Convert file_meta(%v) to json string failed: %v", dbfm, jsErr)
+		ZapLogger.Error("Convert file_meta to json string failed", zap.Any("dbfm", dbfm), zap.Any("err", jsErr))
 		return jsErr
 	}
 
@@ -339,7 +392,37 @@ func (opsFile *DBOpsFile) UpdateFilemetaAndOwnerInDB(fileId string, dbfm *DBFile
 	opsFile.ReleaseConn()
 
 	if qErr != nil {
-		log.Printf("[ERROR][UpdateFilemetaAndOwnerInDB] UPDATE file_meta(%v), owners(%s) to DB failed: %v", dbfm, dbfm.OwnerList, qErr)
+		ZapLogger.Error("UPDATE file_meta, owners to DB failed", zap.Any("dbfm", dbfm), zap.Any("err", qErr))
+		return qErr
+	}
+	defer rows.Close()
+
+	return nil
+}
+
+func (opsFile *DBOpsFile) UpdateFilemetaAndStateInDB(fileName string,
+	fileMeta *definition.FileMeta, state int) error {
+	// Prepare ctx for executing query.
+	var ctx context.Context
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	dbfm := FileMeta2DBFileMeta(fileMeta)
+
+	var encoded []byte
+	encoded, jsErr := json.Marshal(&dbfm)
+	if jsErr != nil {
+		ZapLogger.Error("Convert file_meta to json string failed", zap.Any("dbfm", dbfm), zap.Any("err", jsErr))
+		return jsErr
+	}
+
+	rows, qErr := opsFile.GetConnWithRetry().QueryContext(ctx,
+		"UPDATE "+dbConfigInfo.FileTableName+" SET file_meta = ?, state = ? WHERE fid = ?;",
+		encoded, state, fileName)
+	opsFile.ReleaseConn()
+
+	if qErr != nil {
+		ZapLogger.Error("UPDATE file_meta, state to DB failed",
+			zap.Any("dbfm", dbfm), zap.Any("state", state), zap.Any("err", qErr))
 		return qErr
 	}
 	defer rows.Close()
@@ -369,29 +452,30 @@ func (opsFile *DBOpsFile) CommitFileInDB(fid string) error {
 		"SELECT file_meta FROM "+dbConfigInfo.FileTableName+" WHERE fid = ? FOR UPDATE",
 		fid)
 	if qErr != nil {
-		log.Printf(
-			"[ERROR] CommitFileInDB Lock file(%s) in DB failed: %v",
-			fid, qErr)
+		ZapLogger.Error("CommitFileInDB Lock file in DB failed",
+			zap.Any("fid", fid), zap.Any("err", qErr))
 		return qErr
 	}
 	// Extract file meta.
 	var encoded []byte
 	if row.Next() {
 		if err := row.Scan(&encoded); err != nil {
-			log.Fatal(err)
+			ZapLogger.Error("row.Scan failed", zap.Any("err", err))
+			return err
 		}
 	}
 	if err := row.Err(); err != nil {
-		log.Fatal(err)
+		ZapLogger.Error("row.Err", zap.Any("err", err))
+		return err
 	}
 	row.Close()
 	var fm definition.FileMeta
 	var dbfm DBFileMeta
 	jsErr := json.Unmarshal(encoded, &dbfm)
 	if jsErr != nil {
-		log.Printf(
-			"ERROR:[ListFileFromDB] Convert db string(%s) to dbfm failed: %v",
-			encoded, jsErr)
+		ZapLogger.Error("Convert db string to dbfm failed",
+			zap.Any("encoded", encoded),
+			zap.Any("err", jsErr))
 		return jsErr
 	}
 
@@ -399,15 +483,16 @@ func (opsFile *DBOpsFile) CommitFileInDB(fid string) error {
 	fm = DBFileMeta2FileMeta(&dbfm)
 
 	if dbfm.RngList != "" && !IsRangeFullCoverage(fm.RngCodeList) {
-		log.Printf("[ERROR] CommitFileInDB file(%s) not ready to commit", fid)
+		ZapLogger.Error("CommitFileInDB file not ready to commit", zap.Any("fid", fid))
 		return errors.New("file not ready to commit")
 	}
 
 	_, qErr = tx.ExecContext(
 		ctx, "UPDATE "+dbConfigInfo.FileTableName+" SET state = ? WHERE fid = ?", definition.F_DB_STATE_READY, fid)
 	if qErr != nil {
-		log.Printf(
-			"[ERROR] CommitFileInDB failed on fid(%s): %v", fid, qErr)
+		ZapLogger.Error("CommitFileInDB failed",
+			zap.Any("fid", fid),
+			zap.Any("err", err))
 		return qErr
 	}
 
@@ -415,14 +500,14 @@ func (opsFile *DBOpsFile) CommitFileInDB(fid string) error {
 	if err = tx.Commit(); err != nil {
 		return err
 	}
-	log.Printf("[INFO] Successfully committed file in DB: %s", fid)
+	ZapLogger.Info("Successfully committed file in DB", zap.Any("fid", fid))
 	return nil
 }
 
 // Check file if it's full moon (all ranges are filled). If yes, update file state.
 // TODO: If too many blobs, easily this query slow & timeout.
 func (opsFile *DBOpsFile) CommitCacheFileInDB(
-	pFid string, normalFid, token string, size int32) error {
+	fid, token string, size int32) error {
 	// Prepare ctx for executing query.
 	var ctx context.Context
 	ctx, stop := context.WithCancel(context.Background())
@@ -440,31 +525,32 @@ func (opsFile *DBOpsFile) CommitCacheFileInDB(
 	// Query file entry to fetch lunar hash list.
 	row, qErr := tx.QueryContext(ctx,
 		"SELECT file_meta FROM "+dbConfigInfo.FileTableName+" WHERE fid = ? FOR UPDATE",
-		pFid)
+		fid)
 	if qErr != nil {
-		log.Printf(
-			"[ERROR] CommitCacheFileInDB Lock file(%s) in DB failed: %v",
-			pFid, qErr)
+		ZapLogger.Error("CommitCacheFileInDB Lock file in DB failed",
+			zap.Any("fid", fid), zap.Any("err", qErr))
 		return qErr
 	}
 	// Extract file meta.
 	var encoded []byte
 	if row.Next() {
 		if err := row.Scan(&encoded); err != nil {
-			log.Fatal(err)
+			ZapLogger.Error("row.Scan failed", zap.Any("err", err))
+			return err
 		}
 	}
 	if err := row.Err(); err != nil {
-		log.Fatal(err)
+		ZapLogger.Error("row.Err", zap.Any("err", err))
+		return err
 	}
 	row.Close()
 	var fm definition.FileMeta
 	var dbfm DBFileMeta
 	jsErr := json.Unmarshal(encoded, &dbfm)
 	if jsErr != nil {
-		log.Printf(
-			"ERROR:[CommitCacheFileInDB] Convert db string(%s) to dbfm failed: %v",
-			encoded, jsErr)
+		ZapLogger.Error("Convert db string to dbfm failed",
+			zap.Any("encoded", encoded),
+			zap.Any("err", jsErr))
 		return jsErr
 	}
 	fm = DBFileMeta2FileMeta(&dbfm)
@@ -479,18 +565,18 @@ func (opsFile *DBOpsFile) CommitCacheFileInDB(
 	dbfm = FileMeta2DBFileMeta(&fm)
 	encoded, jsErr = json.Marshal(&dbfm)
 	if jsErr != nil {
-		log.Printf(
-			"ERROR:[CommitCacheFileInDB] Convert file_meta(%v) to json string failed: %v",
-			fm, jsErr)
+		ZapLogger.Error("Convert file_meta to json string failed",
+			zap.Any("file meta", fm),
+			zap.Any("err", err))
 		return jsErr
 	}
 	_, qErr = tx.ExecContext(
 		ctx,
-		"UPDATE "+dbConfigInfo.FileTableName+" SET fid = ?, state = ?, owners = ?,file_meta = ? WHERE fid = ?",
-		normalFid, definition.F_DB_STATE_READY, tid, encoded, pFid)
+		"UPDATE "+dbConfigInfo.FileTableName+" SET state = ?, owners = ?,file_meta = ? WHERE fid = ?",
+		definition.F_DB_STATE_READY, tid, encoded, fid)
 	if qErr != nil {
-		log.Printf(
-			"[ERROR] CommitCacheFileInDB failed on fid(%s): %v", pFid, qErr)
+		ZapLogger.Error("CommitCacheFileInDB failed",
+			zap.Any("fid", fid), zap.Any("err", qErr))
 		return qErr
 	}
 
@@ -498,43 +584,43 @@ func (opsFile *DBOpsFile) CommitCacheFileInDB(
 	if err = tx.Commit(); err != nil {
 		return err
 	}
-	log.Printf("[INFO] Successfully committed cache file in DB: %s", pFid)
+	ZapLogger.Info("Successfully committed cache file in DB", zap.Any("fid", fid))
 	return nil
 }
 
-func (opsFile *DBOpsFile) TagFileInDB(fileId string, tagId string) error {
-	fm, owners, errorListFileAndOwnersFromDB := opsFile.ListFileAndOwnersFromDB(fileId)
-	owner_slices := strings.Split(owners, ",")
-	if errorListFileAndOwnersFromDB != nil {
-		log.Printf("[ERROR][TagFileInDB] Query file_meta, owners by fid(%v) failed: %v", fileId, errorListFileAndOwnersFromDB)
-		return errorListFileAndOwnersFromDB
-	}
+// func (opsFile *DBOpsFile) TagFileInDB(fileId string, tagId string) error {
+// 	fm, owners, errorListFileAndOwnersFromDB := opsFile.ListFileAndOwnersFromDB(fileId)
+// 	owner_slices := strings.Split(owners, ",")
+// 	if errorListFileAndOwnersFromDB != nil {
+// 		log.Printf("[ERROR][TagFileInDB] Query file_meta, owners by fid(%v) failed: %v", fileId, errorListFileAndOwnersFromDB)
+// 		return errorListFileAndOwnersFromDB
+// 	}
 
-	i := 0
-	list_exit := false
-	for e := fm.OwnerList.Front(); e != nil; e = e.Next() {
-		if e.Value != owner_slices[i] {
-			errMsg := fmt.Sprintf(
-				"[ERROR][TagFileInDB] fm.OwnerList[%s] != owner_slices[%s].",
-				e.Value, owner_slices[i])
-			dbDateErr := errors.New(errMsg)
-			return dbDateErr
-		}
-		i++
-		if e.Value == tagId {
-			list_exit = true
-			break
-		}
-	}
-	var dbfm DBFileMeta
-	if !list_exit {
-		fm.OwnerList.PushBack(tagId)
-		dbfm = FileMeta2DBFileMeta(fm)
-		errorUpdateFilemetaAndOwnerInDB := opsFile.UpdateFilemetaAndOwnerInDB(fileId, &dbfm)
-		return errorUpdateFilemetaAndOwnerInDB
-	}
-	return nil
-}
+// 	i := 0
+// 	list_exit := false
+// 	for e := fm.OwnerList.Front(); e != nil; e = e.Next() {
+// 		if e.Value != owner_slices[i] {
+// 			errMsg := fmt.Sprintf(
+// 				"[ERROR][TagFileInDB] fm.OwnerList[%s] != owner_slices[%s].",
+// 				e.Value, owner_slices[i])
+// 			dbDateErr := errors.New(errMsg)
+// 			return dbDateErr
+// 		}
+// 		i++
+// 		if e.Value == tagId {
+// 			list_exit = true
+// 			break
+// 		}
+// 	}
+// 	var dbfm DBFileMeta
+// 	if !list_exit {
+// 		fm.OwnerList.PushBack(tagId)
+// 		dbfm = FileMeta2DBFileMeta(fm)
+// 		errorUpdateFilemetaAndOwnerInDB := opsFile.UpdateFilemetaAndOwnerInDB(fileId, &dbfm)
+// 		return errorUpdateFilemetaAndOwnerInDB
+// 	}
+// 	return nil
+// }
 
 // Function: Delete a file entry with fileId in files2 table.
 //
@@ -543,32 +629,32 @@ func (opsFile *DBOpsFile) TagFileInDB(fileId string, tagId string) error {
 // Input: fileId
 //
 // Output: error
-func (opsFile *DBOpsFile) DeleteFileWithFidInDB(fileId string) error {
-	// Prepare ctx for executing query.
-	var ctx context.Context
-	ctx, stop := context.WithCancel(context.Background())
-	defer stop()
+// func (opsFile *DBOpsFile) DeleteFileWithFidInDB(fileId string) error {
+// 	// Prepare ctx for executing query.
+// 	var ctx context.Context
+// 	ctx, stop := context.WithCancel(context.Background())
+// 	defer stop()
 
-	//update filed
-	time := strconv.FormatInt(time.Now().UnixMilli(), 10)
-	trashFileId := util.GetHashedIdFromStr("trash") + "_" + fileId + "_" + time
+// 	//update filed
+// 	time := strconv.FormatInt(time.Now().UnixMilli(), 10)
+// 	trashFileId := util.GetHashedIdFromStr("trash") + "_" + fileId + "_" + time
 
-	// Op DB.table
-	rows, qErr := opsFile.GetConnWithRetry().QueryContext(ctx,
-		"UPDATE "+dbConfigInfo.FileTableName+" SET fid = ?, state = ? WHERE fid = ? AND state = ?;",
-		trashFileId, definition.F_DB_STATE_DELETED,
-		fileId, definition.F_DB_STATE_READY)
-	opsFile.ReleaseConn()
+// 	// Op DB.table
+// 	rows, qErr := opsFile.GetConnWithRetry().QueryContext(ctx,
+// 		"UPDATE "+dbConfigInfo.FileTableName+" SET fid = ?, state = ? WHERE fid = ? AND state = ?;",
+// 		trashFileId, definition.F_DB_STATE_DELETED,
+// 		fileId, definition.F_DB_STATE_READY)
+// 	opsFile.ReleaseConn()
 
-	if qErr != nil {
-		log.Printf("[ERROR][DeleteFileWithFidInDB] UPDATE files.state by fid(%s), state(%d) to DB failed: %v", fileId, definition.F_DB_STATE_READY, qErr)
-		return qErr
-	}
-	defer rows.Close()
+// 	if qErr != nil {
+// 		log.Printf("[ERROR][DeleteFileWithFidInDB] UPDATE files.state by fid(%s), state(%d) to DB failed: %v", fileId, definition.F_DB_STATE_READY, qErr)
+// 		return qErr
+// 	}
+// 	defer rows.Close()
 
-	return nil
+// 	return nil
 
-}
+// }
 
 func (opsFile *DBOpsFile) DeleteFileWithTripleIdInDB(tripleId string) error {
 	// Prepare ctx for executing query.
@@ -580,7 +666,24 @@ func (opsFile *DBOpsFile) DeleteFileWithTripleIdInDB(tripleId string) error {
 		tripleId)
 	opsFile.ReleaseConn()
 	if err != nil {
-		log.Printf("[ERROR][DeleteFileWithTripleIdInDB] DELETE files.state by tripleId(%s) to DB failed: %v", tripleId, err)
+		ZapLogger.Error("DELETE files.state by tripleId to DB failed",
+			zap.Any("tripleId", tripleId), zap.Any("err", err))
+		return err
+	}
+	return nil
+}
+
+func (opsFile *DBOpsFile) DeletePendingFileWithFIdInDB(fileId string) error {
+	// Prepare ctx for executing query.
+	var ctx context.Context
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	_, err := opsFile.GetConnWithRetry().ExecContext(ctx,
+		"DELETE FROM "+dbConfigInfo.FileTableName+" WHERE fid = ? AND state = ?;",
+		fileId, definition.F_BLOB_STATE_PENDING)
+	opsFile.ReleaseConn()
+	if err != nil {
+		ZapLogger.Error("DELETE pending file by fileId to DB failed", zap.Any("fileId", fileId), zap.Any("err", err))
 		return err
 	}
 	return nil
@@ -596,7 +699,7 @@ func (opsFile *DBOpsFile) DeleteAllPendingFileInDB() error {
 		definition.F_BLOB_STATE_PENDING)
 	opsFile.ReleaseConn()
 	if err != nil {
-		log.Printf("[ERROR][DeleteAllPendingFileInDB] DELETE files.state F_BLOB_STATE_PENDING to DB failed: %v", err)
+		ZapLogger.Error("DeleteAllPendingFileInDB failed", zap.Any("err", err))
 		return err
 	}
 	return nil
@@ -611,7 +714,7 @@ func (opsFile *DBOpsFile) ListTripleIdOfAllFiles() ([]string, error) {
 		"SELECT DISTINCT owners FROM "+dbConfigInfo.FileTableName+";")
 	opsFile.ReleaseConn()
 	if err != nil {
-		log.Printf("[ERROR][ListTripleIdOfAllFiles] DB failed: %v", err)
+		ZapLogger.Error("ListTripleIdOfAllFiles failed", zap.Any("err", err))
 		return nil, err
 	}
 	defer rows.Close()

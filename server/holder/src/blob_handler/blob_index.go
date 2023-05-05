@@ -11,13 +11,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"strings"
 	"sync"
 	"unsafe"
 
 	"github.com/common/definition"
+	. "github.com/common/zaplog"
+	"go.uber.org/zap"
 )
 
 // All state must add their value upon base to get actual state value.
@@ -104,8 +105,8 @@ func (ih *IndexHeader) New(shardId int, triId string, isLarge bool) int64 {
 	}
 	ih.LocalName = fmt.Sprintf("%s/idx_h_%d_%s.dat", localfsPrefix, shardId, triId)
 	info, err := os.Stat(ih.LocalName)
-	// TODO: stat error not necessary means file doesn't exist
-	if err != nil {
+
+	if os.IsNotExist(err) {
 		if isLarge {
 			state := K_index_header_large + K_state_base_ascii
 			return ih.create(uint8(state))
@@ -113,6 +114,8 @@ func (ih *IndexHeader) New(shardId int, triId string, isLarge bool) int64 {
 			state := K_index_header_open + K_state_base_ascii
 			return ih.create(uint8(state))
 		}
+	} else if err != nil {
+		ZapLogger.Fatal("IndexHeader", zap.Any("err", err))
 	}
 	ih.load(info.Size())
 	if len(ih.RefMap) > 0 {
@@ -123,8 +126,8 @@ func (ih *IndexHeader) New(shardId int, triId string, isLarge bool) int64 {
 
 // created with open state
 func (ih *IndexHeader) create(state uint8) int64 {
-	log.Printf("[INFO] Index file(%s) doesn't exist, creating a new one.\n",
-		ih.LocalName)
+	ZapLogger.Info("Index file doesn't exist, creating a new one",
+		zap.Any("file", ih.LocalName))
 	f, err := os.Create(ih.LocalName)
 	Check(err)
 	// Prepare encoded state bytes.
@@ -150,14 +153,11 @@ func (ih *IndexHeader) create(state uint8) int64 {
 
 // Hydrate IndexHeader by loading from local file
 func (ih *IndexHeader) load(size int64) {
-	log.Printf(
-		"[INFO] >>>> Index file(%s) already exists, size(%d bytes), loading state"+
-			" and blob indices from it.\n",
-		ih.LocalName, size)
+	ZapLogger.Info("Index file already exists, loading state and blob indices from it",
+		zap.Any("file", ih.LocalName), zap.Any("size", size))
 	ih.RWLock.Lock()
 	defer ih.RWLock.Unlock()
 
-	log.Printf("size of ih.info: %d", unsafe.Sizeof(ih.Info))
 	idxBaseInfoLen := int64(unsafe.Sizeof(ih.Info))
 	stateBytes := make([]byte, idxBaseInfoLen)
 
@@ -194,9 +194,6 @@ func (ih *IndexHeader) load(size int64) {
 		ih.RefMap[ies[i].BlobId] = &ies[i]
 	}
 
-	log.Printf(
-		"[INFO] <<<< Loaded index file %s, state(%d), entry num(%d).",
-		ih.LocalName, ih.Info.State, len(ih.RefMap))
 }
 
 // TODO: Add fid as backward reference to the file it belongs.
@@ -226,9 +223,9 @@ func (ih *IndexHeader) Put(blobId string, offset int64, size int64) (int64, erro
 	ih.Entries.PushBack(ie)
 	// Store in map for lookup
 	ih.RefMap[blobId] = &ie
-
-	log.Printf("[INFO] Index File: Put blob entry(%s) succeeded, offset(%d), "+
-		"sizeWritten(%d)", blobId, offset, idxBytes)
+	ZapLogger.Info(" Put blob entry succeeded",
+		zap.Any("blobId", blobId), zap.Any("offset", offset),
+		zap.Any("sizeWritten", idxBytes))
 	return idxBytes, nil
 }
 
@@ -240,8 +237,9 @@ func (ih *IndexHeader) Get(blobId string) *IndexEntry {
 	pEntry, exist := ih.RefMap[blobId]
 
 	if exist {
-		log.Printf("[INFO] Index File: Get blob entry(%s) succeeded,"+
-			" entry(%v)", blobId, *pEntry)
+		ZapLogger.Info("Get blob entry succeeded",
+			zap.Any("blobId", blobId),
+			zap.Any("entry", *pEntry))
 		return pEntry
 	}
 	return nil
@@ -288,11 +286,11 @@ func (ih *IndexHeader) flush(entry IndexEntry) (int64, error) {
 	}
 	if !ih.Empty {
 		if int64(res)-1 != K_index_entry_len {
-			log.Fatalf("[INDEX FLUSH ERROR] : datalen %v is not equal to size %v\n", int64(res)-1, K_index_entry_len)
+			ZapLogger.Fatal("index flush", zap.Any("datalen", int64(res)-1), zap.Any("size", K_index_entry_len))
 		}
 	} else {
 		if int64(res)-1 != K_index_entry_len-2 {
-			log.Fatalf("[INDEX FLUSH ERROR] : datalen %v is not equal to size %v\n", int64(res)-1, K_index_entry_len-2)
+			ZapLogger.Fatal("index flush", zap.Any("datalen", int64(res)-1), zap.Any("size", K_index_entry_len-2))
 		}
 	}
 	ih.Empty = false
@@ -305,7 +303,7 @@ func (ih IndexHeader) Close() {
 	ih.RWLock.Lock()
 	defer ih.RWLock.Unlock()
 	if ih.Info.State == K_index_header_closed+K_state_base_ascii {
-		log.Printf("File(%s) already closed.", ih.LocalName)
+		ZapLogger.Info("File already closed", zap.Any("file", ih.LocalName))
 		return
 	}
 
@@ -320,7 +318,7 @@ func (ih IndexHeader) Close() {
 	_, err = f.WriteAt(buf.Bytes(), 0)
 	Check(err)
 
-	log.Printf("[INFO] Closing the %s", ih.LocalName)
+	ZapLogger.Info("Closing the file", zap.Any("file", ih.LocalName))
 	f.Close()
 }
 

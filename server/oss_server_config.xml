@@ -14,5 +14,6 @@
         <oss_triplet_closing_threshold_mb>200</oss_triplet_closing_threshold_mb>
         <oss_triplet_large_threshold_mb>100</oss_triplet_large_threshold_mb>
         <oss_db_num>1</oss_db_num>
+        <local_mode>false</local_mode>
     </oss_common_config>
 </oss_server_config>

@@ -35,7 +35,7 @@
 - 缓存替换策略改进
 
 ## Contact Us
-  * Issue: https://github.com/rhinouser0/ryno/issues
+  * Issue: [https://github.com/rhinouser0/ryno/issues](https://github.com/rhinouser0/riverpass/issues)
   * Email: rhino_fs@163.com
 
 ## License

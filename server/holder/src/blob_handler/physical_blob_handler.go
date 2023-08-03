@@ -1,6 +1,6 @@
-// //////////////////////////////
-// 2022 SHLab all rights reserved
-// //////////////////////////////
+// ///////////////////////////////////////////////
+// 2023 Shanghai AI Laboratory all rights reserved
+// ///////////////////////////////////////////////
 
 // TODO: It's is not eventual goal to use phy blb handler to directly handle
 // blob writes. We need to create a logical_blob_handler file, wrap

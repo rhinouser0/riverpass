@@ -38,7 +38,7 @@ $ wget http://localhost:getFile?url=$YOUR_REMOTE_URL
 - Cache eviction algorithm improvement
 
 ## Contact Us
-  * Issue: https://github.com/rhinouser0/ryno/issues
+  * Issue: [https://github.com/rhinouser0/ryno/issues](https://github.com/rhinouser0/riverpass/issues)
   * Email: rhino_fs@163.com
 
 ## License

@@ -40,7 +40,7 @@ $ git checkout -b fix-typo-in-document rp_master/master
 为了增加沟通效率，reviewer 一般要求 contributor 遵从以下规则
 
 * 代码注释，代码code review的文字交互过程必须全部使用英文
-* 新建go文件需添加抬头“2022 SHLab all rights reserved”
+* 新建go文件需添加抬头“2023 Shanghai AI Laboratory all rights reserved”
 * 包、包目录、源文件名请使用snake case
 * 不能随意增删空行
 * 所有函数名、非常数或FLAG变量命名、结构体定义均需遵循camel case。当然有些特殊情况需符合Go语言特性，如下划线用以省略命名，以及函数名如需由包外调用则需首字母大写

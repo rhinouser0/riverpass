@@ -40,10 +40,6 @@ tar -xvf data.tar
   * Enter `server/holder` folder, run `./oss_start.sh` to build the go program and start server for debug.
 * [How to contribute](docs/how-to-contribute.zh.md)
 
-
-
-```
-
 ## Dependency
 * MySQL 8.0
 * Aliyun OSS SDK

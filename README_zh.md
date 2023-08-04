@@ -4,7 +4,7 @@
 [![GitHub license](https://img.shields.io/badge/license-apache--2--Clause-brightgreen.svg)](./LICENSE)
 
 
-一个简易的基于本地磁盘的远端存储的热数据缓存服务。
+这是一个简易的基于本地磁盘的远端存储的热数据缓存服务。
 
 * 极简的启动和停止缓存服务的命令。
 * 无需对远端云存储执行繁琐的配置步骤。

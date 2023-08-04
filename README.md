@@ -16,9 +16,23 @@ $ wget http://localhost:getFile?url=$YOUR_REMOTE_URL
 ## Design
 [Detailed design document](docs/original-design-doc.md)
 
+
+
+## Docker Image
+* Download Program Image: [https://riverpass.oss-cn-shanghai.aliyuncs.com/images/oss.tar](https://riverpass.oss-cn-shanghai.aliyuncs.com/images/oss.tar).
+* Download Database Config:[https://riverpass.oss-cn-shanghai.aliyuncs.com/images/data.tar](https://riverpass.oss-cn-shanghai.aliyuncs.com/images/data.tar)
+* Load Images
+```bash
+docker load -i oss.tar
+```
+* Load database config in `server` folder
+```bash
+tar -xvf data.tar
+```
+
 ## HowTo
 * How to use
-  * Enter `server` folder, run `./oss_docker_start.sh 100`, '100' means cache size 100MB. Cache data default flushes to /tmp/localfs_oss/ folder.
+  * Enter `server` folder, run `./oss_docker_start.sh 100`, '100' means cache size 100MB. Cache data default flushes to server/localfs_oss/ folder.
   * Use `wget <url>` command, replacing host path by localhost and cache port. eg.: `wget http://localhost:10009/getFile?url=https://raw.githubusercontent.com/open-mmlab/mmdeploy/master/resources/mmdeploy-logo.png`
   * Run `./oss_docker_stop.sh` to stop the cache. Data will be left on disk.
   * Run `./oss_docker_restart.sh` to restart the cache, data and their metadata will be loaded.
@@ -27,13 +41,7 @@ $ wget http://localhost:getFile?url=$YOUR_REMOTE_URL
 * [How to contribute](docs/how-to-contribute.zh.md)
 
 
-## Docker Image
-* Download Program Image: [https://riverpass.oss-cn-shanghai.aliyuncs.com/images/riverpass_image.tar](https://riverpass.oss-cn-shanghai.aliyuncs.com/images/riverpass_image.tar).
-* Download Database Image:[https://riverpass.oss-cn-shanghai.aliyuncs.com/images/oss-mysql.tar](https://riverpass.oss-cn-shanghai.aliyuncs.com/images/oss-mysql.tar)
-* Load Images
-```bash
-docker load -i riverpass
-docker load -i oss-mysql
+
 ```
 
 ## Dependency

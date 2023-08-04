@@ -25,7 +25,7 @@ docker load -i oss.tar
 tar -xvf data.tar
 ```
 
-* 如何使用
+## 如何使用
   * 进入 `server` 文件夹, 运行 `./oss_docker_start.sh 100`, '100' 指缓存大小为100MB. 缓存数据默认存放到 /server/localfs_oss/ 文件夹.
   * 使用 `wget <url>` 命令, 替换路径为执行的主机地址和缓存端口。例如: `wget http://localhost:10009/getFile?url=https://raw.githubusercontent.com/open-mmlab/mmdeploy/master/resources/mmdeploy-logo.png`
   * 运行 `./oss_docker_stop.sh` 来停止缓存服务. 数据会被保存在盘上.
@@ -34,18 +34,18 @@ tar -xvf data.tar
   * 进入 `server/holder` 文件夹, 运行 `./oss_start.sh` 来编译Go程序和启动服务来调试。
 * [如何贡献改动](docs/how-to-contribute.zh.md)
 
-## Dependency
+## 依赖项
 * MySQL 8.0
 * Aliyun OSS SDK
 
-## Coming Soon
+## 后续开发
 - CI和测试覆盖
 - 数据库中失效元数据的垃圾回收
 - OSS下载优化
 - 其他云服务提供商的对象接入
 - 缓存替换策略改进
 
-## Contact Us
+## 联系我们
   * Issue: [this link](https://github.com/rhinouser0/riverpass/issues)
   * Email: rhino_fs@163.com
 

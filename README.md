@@ -26,6 +26,18 @@ $ wget http://localhost:getFile?url=$YOUR_REMOTE_URL
   * Enter `server/holder` folder, run `./oss_start.sh` to build the go program and start server for debug.
 * [How to contribute](docs/how-to-contribute.zh.md)
 
+
+## Docker Image
+* Download : [https://riverpass.oss-cn-shanghai.aliyuncs.com/images/riverpass_image.tar](https://riverpass.oss-cn-shanghai.aliyuncs.com/images/riverpass_image.tar).
+* Docker Run Example
+```bash
+$ sudo docker run -p 10009:10008  --name riverpass
+-v /tmp/riverpass_storage:/tmp/riverpass_storage
+-v  {local/server/config/path}:/ossproject/oss_server_config.xml
+-v  {local/server/config/path}:/ossproject/oss_db_config.xml
+-e max_size=10240 riverpass
+```
+
 ## Dependency
 * MySQL 8.0
 * Aliyun OSS SDK

@@ -3,13 +3,13 @@
 ## Riverpass | [Documentation](docs/)
 [![GitHub license](https://img.shields.io/badge/license-apache--2--Clause-brightgreen.svg)](./LICENSE)
 
-A handy async file cache service
+A handy file cache service
 
 ```bash
 $ wget http://localhost:getFile?url=$YOUR_REMOTE_URL
 ```
 
-* Cache for hot content from remote
+* Cache for hot content from remote cloud object storage(or public image)
 * Extremely simple start and stop command, no heavy configuration
 * Cache item persistence ability: previous items will be reloaded after server restart
 
@@ -52,7 +52,7 @@ tar -xvf data.tar
 - Cache eviction algorithm improvement
 
 ## Contact Us
-  * Issue: [https://github.com/rhinouser0/ryno/issues](https://github.com/rhinouser0/riverpass/issues)
+  * Issue: [this link](https://github.com/rhinouser0/riverpass/issues)
   * Email: rhino_fs@163.com
 
 ## License

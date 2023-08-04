@@ -28,14 +28,12 @@ $ wget http://localhost:getFile?url=$YOUR_REMOTE_URL
 
 
 ## Docker Image
-* Download : [https://riverpass.oss-cn-shanghai.aliyuncs.com/images/riverpass_image.tar](https://riverpass.oss-cn-shanghai.aliyuncs.com/images/riverpass_image.tar).
-* Docker Run Example
+* Download Program Image: [https://riverpass.oss-cn-shanghai.aliyuncs.com/images/riverpass_image.tar](https://riverpass.oss-cn-shanghai.aliyuncs.com/images/riverpass_image.tar).
+* Download Database Image:[https://riverpass.oss-cn-shanghai.aliyuncs.com/images/oss-mysql.tar](https://riverpass.oss-cn-shanghai.aliyuncs.com/images/oss-mysql.tar)
+* Load Images
 ```bash
-$ sudo docker run -p 10009:10008  --name riverpass
--v /tmp/riverpass_storage:/tmp/riverpass_storage
--v  {local/server/config/path}:/ossproject/oss_server_config.xml
--v  {local/server/config/path}:/ossproject/oss_db_config.xml
--e max_size=10240 riverpass
+docker load -i riverpass
+docker load -i oss-mysql
 ```
 
 ## Dependency
